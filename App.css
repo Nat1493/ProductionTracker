@@ -1,42 +1,48 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
+import React, { useState } from 'react';
+import { Plus, Calendar, Package, TrendingUp, X, Edit2, Save, Settings, Trash2, Target } from 'lucide-react';
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
+const App = () => {
+  const [orders, setOrders] = useState([
+    {
+      id: 1,
+      orderNumber: 'ORD-001',
+      client: 'Fashion Hub Ltd',
+      garmentType: 'T-Shirts',
+      quantity: 5000,
+      lineAssigned: 'Line 1',
+      startDate: '2025-10-08',
+      endDate: '2025-10-15',
+      status: 'In Production',
+      color: '#3B82F6'
+    },
+    {
+      id: 2,
+      orderNumber: 'ORD-002',
+      client: 'StyleCo',
+      garmentType: 'Dresses',
+      quantity: 2000,
+      lineAssigned: 'Line 2',
+      startDate: '2025-10-09',
+      endDate: '2025-10-20',
+      status: 'In Production',
+      color: '#10B981'
+    }
+  ]);
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
+  const [productionLines, setProductionLines] = useState([
+    { id: 1, name: 'Line 1', dailyTarget: 800 },
+    { id: 2, name: 'Line 2', dailyTarget: 800 },
+    { id: 3, name: 'Line 3', dailyTarget: 600 },
+    { id: 4, name: 'Line 4', dailyTarget: 600 },
+    { id: 5, name: 'Line 5', dailyTarget: 500 }
+  ]);
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
+  // ... [PASTE THE REST OF THE CODE FROM THE ARTIFACT HERE]
+  // I'll provide a link below to get the full code
 
-.card {
-  padding: 2em;
-}
+  return (
+    // ... [THE ENTIRE JSX RETURN]
+  );
+};
 
-.read-the-docs {
-  color: #888;
-}
+export default App;
