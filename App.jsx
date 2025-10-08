@@ -541,9 +541,8 @@ const App = () => {
 
   const getHourlyTarget = (order) => {
     if (!order || !order.dailyTarget) return null;
-    const targetStatus = checkTargetMet(order);
-    if (!targetStatus) return null;
-    return Math.ceil(targetStatus.dailyRequiredPerLine / workingHours);
+    // Use the user-set daily target per line, not the calculated required
+    return Math.ceil(order.dailyTarget / workingHours);
   };
 
   const getHourlyStatus = (order, line, date, hour) => {
@@ -1511,257 +1510,336 @@ const App = () => {
         </div>
       </div>
 
-      {/* Scoreboard View */}
-      {showScoreboard && (
-        <div className="fixed inset-0 bg-gradient-to-br from-blue-900 to-purple-900 z-50 flex flex-col">
-          {/* Header - Fixed */}
-          <div className="flex items-center justify-between p-6 bg-black/20 backdrop-blur-sm">
-            <div>
-              <h1 className="text-3xl md:text-4xl font-bold text-white mb-1">Production Scoreboard</h1>
-              <p className="text-blue-200 text-sm md:text-base">
-                {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-              </p>
-            </div>
-            <button
-              onClick={() => setShowScoreboard(false)}
-              className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 md:px-6 md:py-3 rounded-lg transition-colors flex items-center gap-2"
-            >
-              <X size={24} />
-              Close
-            </button>
-          </div>
+{/* Scoreboard View - Single Screen Table with Input */}
+{showScoreboard && (
+  <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col h-screen overflow-hidden">
+    {/* Compact Header */}
+    <div className="flex-shrink-0 px-6 py-3 bg-slate-900 border-b border-slate-700 flex items-center justify-between">
+      <div>
+        <h1 className="text-2xl font-bold text-white">Production Scoreboard</h1>
+        <p className="text-slate-400 text-xs">
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          {' • '}Click hourly cells to input data
+        </p>
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => {
+            const today = new Date().toISOString().split('T')[0];
+            exportDailyReport(today);
+          }}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold"
+        >
+          <Package size={16} />
+          Export
+        </button>
+        <button
+          onClick={() => setShowScoreboard(false)}
+          className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
+        >
+          <X size={18} />
+          Close
+        </button>
+      </div>
+    </div>
 
-          {/* Scrollable Content Area */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6">
-            <div className="max-w-[1920px] mx-auto">
-              {/* Export Button */}
-              <div className="flex justify-end mb-4">
-                <button
-                  onClick={() => {
-                    const today = new Date().toISOString().split('T')[0];
-                    exportDailyReport(today);
-                  }}
-                  className="flex items-center gap-2 bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  <Package size={20} />
-                  Export Today's Report
-                </button>
+    {/* Main Table - Fills remaining space */}
+    <div className="flex-1 p-4 min-h-0 overflow-hidden">
+      <div className="h-full flex flex-col">
+        {/* Production Lines Table */}
+        <div className="flex-1 bg-slate-900 rounded-xl border border-slate-700 overflow-hidden flex flex-col">
+          {/* Table Header */}
+          <div className="flex-shrink-0 bg-slate-800 border-b border-slate-700">
+            <div className="flex items-stretch">
+              {/* Line Info Column */}
+              <div className="w-64 border-r border-slate-700 p-3">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Production Line</h3>
               </div>
-
-              {/* Lines Grid */}
-              <div className="space-y-4 mb-6">
-                {productionLines.map(line => {
-                  const today = new Date().toISOString().split('T')[0];
-                  const order = getOrderForDate(line.name, today);
-                  
-                  if (!order) {
-                    return (
-                      <div key={line.id} className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-                        <div className="flex items-center justify-between">
-                          <h2 className="text-xl md:text-2xl font-bold text-white">{line.name}</h2>
-                          <span className="text-gray-300 text-sm md:text-base">No active order</span>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  const hourlyTarget = getHourlyTarget(order);
-                  const targetStatus = checkTargetMet(order);
-
-                  return (
-                    <div key={line.id} className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-                      <div className="flex flex-wrap items-center justify-between mb-3 gap-2">
-                        <div>
-                          <h2 className="text-xl md:text-2xl lg:text-3xl font-bold text-white">{line.name}</h2>
-                          <p className="text-blue-200 text-xs md:text-sm">
-                            {order.orderNumber} - {order.client}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs text-blue-200">Target/hour</p>
-                          <p className="text-lg md:text-xl lg:text-2xl font-bold text-white">{hourlyTarget || 'N/A'} pcs</p>
-                        </div>
-                      </div>
-
-                      {/* Hourly Performance - Responsive Grid */}
-                      <div 
-                        className="grid gap-2 mb-3"
-                        style={{ 
-                          gridTemplateColumns: workingHours <= 8 
-                            ? `repeat(${workingHours}, minmax(0, 1fr))` 
-                            : workingHours <= 12 
-                            ? 'repeat(auto-fit, minmax(80px, 1fr))'
-                            : 'repeat(auto-fit, minmax(70px, 1fr))'
-                        }}
-                      >
-                        {Array.from({ length: workingHours }, (_, i) => i + 1).map(hour => {
-                          const hourStatus = getHourlyStatus(order, line.name, today, hour);
-                          const timeLabel = getTimeLabel(hour);
-                          const key = `${line.name}-${today}-${hour}`;
-                          const rejects = order.hourlyRejects?.[key] || 0;
-                          
-                          return (
-                            <div
-                              key={hour}
-                              className={`rounded-lg p-2 md:p-3 text-center transition-all ${
-                                hourStatus 
-                                  ? hourStatus.status === 'excellent' 
-                                    ? 'bg-green-500/20 border-2 border-green-400' 
-                                    : hourStatus.status === 'good'
-                                    ? 'bg-green-500/10 border-2 border-green-500'
-                                    : hourStatus.status === 'ok'
-                                    ? 'bg-yellow-500/10 border-2 border-yellow-500'
-                                    : hourStatus.status === 'concern'
-                                    ? 'bg-orange-500/10 border-2 border-orange-500'
-                                    : 'bg-red-500/10 border-2 border-red-500'
-                                  : 'bg-white/5 border-2 border-white/10'
-                              }`}
-                            >
-                              <div className="text-[10px] md:text-xs text-blue-200 mb-1">{timeLabel}</div>
-                              {hourStatus ? (
-                                <>
-                                  <div className="text-xl md:text-2xl lg:text-3xl mb-1">{hourStatus.emoji}</div>
-                                  <div className="text-base md:text-lg lg:text-xl font-bold text-white">{hourStatus.actual}</div>
-                                  <div className="text-[10px] md:text-xs text-blue-300">pcs</div>
-                                  {rejects > 0 && (
-                                    <div className="text-[10px] md:text-xs text-red-400 mt-1">
-                                      ❌ {rejects}
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <>
-                                  <div className="text-lg md:text-xl lg:text-2xl mb-1">⏱️</div>
-                                  <div className="text-xs text-gray-400">Wait</div>
-                                </>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Line Summary */}
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex gap-4 md:gap-6">
-                          <div>
-                            <p className="text-[10px] md:text-xs text-blue-200">Production</p>
-                            <p className="text-lg md:text-xl lg:text-2xl font-bold text-white">
-                              {order.dailyProduction?.[`${line.name}-${today}`] || 0} pcs
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] md:text-xs text-red-200">Rejects</p>
-                            <p className="text-lg md:text-xl lg:text-2xl font-bold text-red-400">
-                              {(() => {
-                                let total = 0;
-                                for (let h = 1; h <= workingHours; h++) {
-                                  const key = `${line.name}-${today}-${h}`;
-                                  total += order.hourlyRejects?.[key] || 0;
-                                }
-                                return total;
-                              })()} pcs
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] md:text-xs text-blue-200">Target</p>
-                            <p className="text-lg md:text-xl lg:text-2xl font-bold text-white">
-                              {targetStatus?.dailyRequiredPerLine || 0} pcs
-                            </p>
-                          </div>
-                        </div>
-                        <div>
-                          {order.dailyProduction?.[`${line.name}-${today}`] >= (targetStatus?.dailyRequiredPerLine || 0) ? (
-                            <div className="flex items-center gap-2 bg-green-500/20 px-3 py-1.5 md:px-4 md:py-2 rounded-lg">
-                              <span className="text-xl md:text-2xl">✅</span>
-                              <span className="text-green-300 font-semibold text-sm md:text-base">Target Met!</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 bg-orange-500/20 px-3 py-1.5 md:px-4 md:py-2 rounded-lg">
-                              <span className="text-xl md:text-2xl">⚡</span>
-                              <span className="text-orange-300 font-semibold text-sm md:text-base">In Progress</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+              
+              {/* Hourly Columns */}
+              <div className="flex-1 flex">
+                {Array.from({ length: workingHours }, (_, i) => i + 1).map(hour => (
+                  <div 
+                    key={hour} 
+                    className="flex-1 border-r border-slate-700 last:border-r-0 p-2 text-center"
+                  >
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">
+                      {getTimeLabel(hour)}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
 
-              {/* Overall Statistics */}
-              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 md:p-6">
-                <h3 className="text-xl md:text-2xl font-bold text-white mb-3 md:mb-4">Today's Overview</h3>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-6">
-                  <div className="text-center">
-                    <p className="text-blue-200 text-xs md:text-sm mb-1 md:mb-2">Total Production</p>
-                    <p className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">
-                      {productionLines.reduce((sum, line) => {
-                        const today = new Date().toISOString().split('T')[0];
-                        const order = getOrderForDate(line.name, today);
-                        return sum + (order?.dailyProduction?.[`${line.name}-${today}`] || 0);
-                      }, 0)} pcs
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-red-200 text-xs md:text-sm mb-1 md:mb-2">Total Rejects</p>
-                    <p className="text-2xl md:text-3xl lg:text-4xl font-bold text-red-400">
-                      {(() => {
-                        const today = new Date().toISOString().split('T')[0];
-                        let totalRejects = 0;
-                        productionLines.forEach(line => {
-                          const order = getOrderForDate(line.name, today);
-                          if (order) {
-                            for (let h = 1; h <= workingHours; h++) {
-                              const key = `${line.name}-${today}-${h}`;
-                              totalRejects += order.hourlyRejects?.[key] || 0;
-                            }
-                          }
-                        });
-                        return totalRejects;
-                      })()}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-blue-200 text-xs md:text-sm mb-1 md:mb-2">Active Lines</p>
-                    <p className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">
-                      {productionLines.filter(line => {
-                        const today = new Date().toISOString().split('T')[0];
-                        return getOrderForDate(line.name, today);
-                      }).length}/{productionLines.length}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-blue-200 text-xs md:text-sm mb-1 md:mb-2">Work Hours</p>
-                    <p className="text-xl md:text-2xl lg:text-3xl font-bold text-white">
-                      {getTimeLabel(1).split('-')[0]}-{getTimeLabel(workingHours).split('-')[1]}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-blue-200 text-xs md:text-sm mb-1 md:mb-2">Efficiency</p>
-                    <p className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">
-                      {(() => {
-                        const today = new Date().toISOString().split('T')[0];
-                        let totalActual = 0;
-                        let totalTarget = 0;
-                        productionLines.forEach(line => {
-                          const order = getOrderForDate(line.name, today);
-                          if (order) {
-                            totalActual += order.dailyProduction?.[`${line.name}-${today}`] || 0;
-                            const targetStatus = checkTargetMet(order);
-                            totalTarget += targetStatus?.dailyRequiredPerLine || 0;
-                          }
-                        });
-                        const efficiency = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
-                        return `${efficiency}%`;
-                      })()}
-                    </p>
-                  </div>
+              {/* Summary Columns */}
+              <div className="w-80 border-l border-slate-700 flex">
+                <div className="flex-1 p-2 text-center border-r border-slate-700">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Target</div>
+                </div>
+                <div className="flex-1 p-2 text-center border-r border-slate-700">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Production</div>
+                </div>
+                <div className="flex-1 p-2 text-center border-r border-slate-700">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Rejects</div>
+                </div>
+                <div className="flex-1 p-2 text-center">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase">Status</div>
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Table Body - Auto-sized rows */}
+          <div className="flex-1 min-h-0">
+            <div 
+              className="grid h-full"
+              style={{ 
+                gridTemplateRows: `repeat(${productionLines.length}, minmax(0, 1fr))`
+              }}
+            >
+              {productionLines.map((line) => {
+                const today = new Date().toISOString().split('T')[0];
+                const order = getOrderForDate(line.name, today);
+                
+                if (!order) {
+                  return (
+                    <div key={line.id} className="flex items-center border-b border-slate-800 last:border-b-0">
+                      <div className="w-64 border-r border-slate-700 p-3">
+                        <h4 className="text-lg font-bold text-white">{line.name}</h4>
+                        <p className="text-xs text-slate-400">No active order</p>
+                      </div>
+                      <div className="flex-1 flex items-center justify-center text-slate-600">
+                        <span className="text-sm">— No Production —</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const hourlyTarget = getHourlyTarget(order);
+                const targetStatus = checkTargetMet(order);
+                const dailyProduction = order.dailyProduction?.[`${line.name}-${today}`] || 0;
+                const dailyTarget = order.dailyTarget; // User-set target
+                const calculatedTarget = targetStatus?.dailyRequiredPerLine || 0; // Auto-calculated guide
+
+                let totalRejects = 0;
+                for (let h = 1; h <= workingHours; h++) {
+                  const key = `${line.name}-${today}-${h}`;
+                  totalRejects += order.hourlyRejects?.[key] || 0;
+                }
+
+                return (
+                  <div key={line.id} className="flex items-stretch border-b border-slate-800 last:border-b-0 hover:bg-slate-800/30 transition-colors">
+                    {/* Line Info */}
+                      <div className="w-64 border-r border-slate-700 p-3 flex flex-col justify-center">
+                        <div className="flex items-center gap-2 mb-2">
+                          <h4 className="text-xl font-bold text-white">{line.name}</h4>
+                          <span className="px-2 py-0.5 bg-blue-600/20 border border-blue-500/50 rounded text-blue-300 text-xs font-bold">
+                            {order.orderNumber}
+                          </span>
+                        </div>
+                        <p className="text-xs text-cyan-400 font-bold">
+                          Target: {hourlyTarget || '-'}/hr
+                        </p>
+                        {calculatedTarget && calculatedTarget !== dailyTarget && (
+                          <p className="text-xs text-amber-400 mt-0.5">
+                            Guide: {calculatedTarget} pcs/day
+                          </p>
+                        )}
+                      </div>
+                    
+                    {/* Hourly Production - CLICKABLE */}
+                    <div className="flex-1 flex items-stretch">
+                      {Array.from({ length: workingHours }, (_, i) => i + 1).map(hour => {
+                        const hourStatus = getHourlyStatus(order, line.name, today, hour);
+                        const key = `${line.name}-${today}-${hour}`;
+                        const production = order.hourlyProduction?.[key] || 0;
+                        const rejects = order.hourlyRejects?.[key] || 0;
+                        const isWorkingDayToday = isWorkingDay(today);
+                        
+                        return (
+                          <div 
+                            key={hour}
+                            onClick={() => isWorkingDayToday && handleHourlyCellClick(order, line.name, today)}
+                            className={`flex-1 border-r border-slate-700 last:border-r-0 flex flex-col items-center justify-center p-2 transition-all ${
+                              isWorkingDayToday ? 'cursor-pointer hover:bg-slate-700/50' : 'cursor-not-allowed'
+                            } ${
+                              hourStatus 
+                                ? hourStatus.status === 'excellent' 
+                                  ? 'bg-green-500/10 border-y-2 border-y-green-500' 
+                                  : hourStatus.status === 'good'
+                                  ? 'bg-green-500/5'
+                                  : hourStatus.status === 'ok'
+                                  ? 'bg-yellow-500/5'
+                                  : hourStatus.status === 'concern'
+                                  ? 'bg-orange-500/10'
+                                  : 'bg-red-500/10'
+                                : 'bg-slate-900/50'
+                            }`}
+                          >
+                            {hourStatus ? (
+                              <>
+                                <div className="text-2xl mb-1">{hourStatus.emoji}</div>
+                                <div className="text-xl font-black text-white">{production}</div>
+                                {rejects > 0 && (
+                                  <div className="text-xs text-red-400 font-bold mt-0.5">
+                                    -{rejects}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-xl opacity-30">⏱️</div>
+                                <div className="text-xs text-slate-600">Click</div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Summary Stats */}
+                    <div className="w-80 border-l border-slate-700 flex items-stretch">
+                      <div className="flex-1 border-r border-slate-700 flex flex-col items-center justify-center p-2">
+                        <div className="text-2xl font-black text-cyan-400">{dailyTarget || '-'}</div>
+                        <div className="text-xs text-slate-400">target</div>
+                        {calculatedTarget && calculatedTarget !== dailyTarget && (
+                          <div className="text-xs text-amber-400 mt-0.5">({calculatedTarget})</div>
+                        )}
+                      </div>
+                      <div className="flex-1 border-r border-slate-700 flex flex-col items-center justify-center p-2">
+                        <div className="text-2xl font-black text-white">{dailyProduction}</div>
+                        <div className="text-xs text-slate-400">pcs</div>
+                      </div>
+                      <div className="flex-1 border-r border-slate-700 flex flex-col items-center justify-center p-2">
+                        <div className="text-2xl font-black text-red-400">{totalRejects}</div>
+                        <div className="text-xs text-slate-400">pcs</div>
+                      </div>
+                      <div className="flex-1 flex items-center justify-center p-2">
+                        {dailyTarget && dailyProduction >= dailyTarget ? (
+                          <div className="text-center">
+                            <div className="text-3xl mb-1">✅</div>
+                            <div className="text-xs font-bold text-green-400">MET</div>
+                          </div>
+                        ) : dailyTarget ? (
+                          <div className="text-center">
+                            <div className="text-2xl font-black text-yellow-400">
+                              {Math.round((dailyProduction / dailyTarget) * 100)}%
+                            </div>
+                            <div className="text-xs font-bold text-slate-400">Progress</div>
+                          </div>
+                        ) : (
+                          <div className="text-center">
+                            <div className="text-xl text-slate-600">-</div>
+                            <div className="text-xs text-slate-500">No target</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
-      )}
+
+        {/* Overall Summary - Compact at bottom */}
+        <div className="flex-shrink-0 mt-3 bg-slate-900 rounded-xl border border-slate-700 p-4">
+          <div className="flex items-center justify-between gap-6">
+            <div className="text-center">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Total Production</p>
+              <p className="text-3xl font-black text-white">
+                {productionLines.reduce((sum, line) => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const order = getOrderForDate(line.name, today);
+                  return sum + (order?.dailyProduction?.[`${line.name}-${today}`] || 0);
+                }, 0)} <span className="text-sm text-slate-400">pcs</span>
+              </p>
+            </div>
+
+            <div className="w-px h-12 bg-slate-700"></div>
+
+            <div className="text-center">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Total Rejects</p>
+              <p className="text-3xl font-black text-red-400">
+                {(() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  let totalRejects = 0;
+                  productionLines.forEach(line => {
+                    const order = getOrderForDate(line.name, today);
+                    if (order) {
+                      for (let h = 1; h <= workingHours; h++) {
+                        const key = `${line.name}-${today}-${h}`;
+                        totalRejects += order.hourlyRejects?.[key] || 0;
+                      }
+                    }
+                  });
+                  return totalRejects;
+                })()}
+              </p>
+            </div>
+
+            <div className="w-px h-12 bg-slate-700"></div>
+
+            <div className="text-center">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Active Lines</p>
+              <p className="text-3xl font-black text-cyan-400">
+                {productionLines.filter(line => {
+                  const today = new Date().toISOString().split('T')[0];
+                  return getOrderForDate(line.name, today);
+                }).length}/{productionLines.length}
+              </p>
+            </div>
+
+            <div className="w-px h-12 bg-slate-700"></div>
+
+            <div className="text-center">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Work Hours</p>
+              <p className="text-2xl font-black text-white">
+                {getTimeLabel(1).split('-')[0]}-{getTimeLabel(workingHours).split('-')[1]}
+              </p>
+            </div>
+
+            <div className="w-px h-12 bg-slate-700"></div>
+
+            <div className="text-center">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Overall Efficiency</p>
+              <p className={`text-3xl font-black ${
+                (() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  let totalActual = 0;
+                  let totalTarget = 0;
+                  productionLines.forEach(line => {
+                    const order = getOrderForDate(line.name, today);
+                    if (order && order.dailyTarget) {
+                      totalActual += order.dailyProduction?.[`${line.name}-${today}`] || 0;
+                      totalTarget += order.dailyTarget;
+                    }
+                  });
+                  const efficiency = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
+                  return efficiency >= 100 ? 'text-green-400' : efficiency >= 80 ? 'text-yellow-400' : 'text-red-400';
+                })()
+              }`}>
+                {(() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  let totalActual = 0;
+                  let totalTarget = 0;
+                  productionLines.forEach(line => {
+                    const order = getOrderForDate(line.name, today);
+                    if (order && order.dailyTarget) {
+                      totalActual += order.dailyProduction?.[`${line.name}-${today}`] || 0;
+                      totalTarget += order.dailyTarget;
+                    }
+                  });
+                  const efficiency = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
+                  return `${efficiency}%`;
+                })()}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
       {/* Hourly Production Input Modal */}
       {showHourlyInput && selectedHourlyCell && (

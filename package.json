@@ -4,12 +4,17 @@
   "description": "Production tracking system for SS Mudyf factory",
   "author": "SS Mudyf",
   "main": "electron/main.js",
+  "homepage": "./",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "preview": "vite preview",
     "electron": "electron .",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder"
+    "electron:build": "npm run build && electron-builder",
+    "rebuild": "rimraf dist release && npm run build && npm run electron:build",
+    "test:build": "npm run build && electron .",
+    "clean": "rimraf dist release"
   },
   "build": {
     "appId": "com.ssmudyf.productiontracker",
@@ -23,19 +28,33 @@
       "buildResources": "public",
       "output": "release"
     },
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "public/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
+      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "shortcutName": "SS Mudyf Production Tracker",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "asar": true,
@@ -44,15 +63,28 @@
     ],
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
-      "icon": "public/icon.icns"
+      "icon": "public/icon.icns",
+      "category": "public.app-category.business"
     },
     "linux": {
       "target": [
-        "AppImage"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "icon": "public/icon.png"
+      "icon": "public/icon.png",
+      "category": "Office"
     }
   },
   "dependencies": {
@@ -78,8 +110,21 @@
     "eslint-plugin-react-refresh": "^0.4.22",
     "globals": "^16.4.0",
     "postcss": "^8.5.6",
+    "rimraf": "^6.0.1",
     "tailwindcss": "^3.4.18",
-    "vite": "npm:rolldown-vite@7.1.14",
+    "vite": "^7.1.14",
     "wait-on": "^9.0.1"
+  },
+  "keywords": [
+    "production",
+    "tracking",
+    "manufacturing",
+    "electron",
+    "react"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/ss-mudyf-tracker.git"
   }
 }

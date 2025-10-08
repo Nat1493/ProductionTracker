@@ -21,7 +21,11 @@ if exist "dist" (
         timeout /t 1 /nobreak >nul
     )
 )
-echo ✓ dist folder removed
+if exist "release" (
+    echo Removing release folder...
+    rmdir /s /q "release" 2>nul
+)
+echo ✓ Build folders cleaned
 echo.
 
 echo [Step 3] Installing dependencies...
@@ -34,17 +38,27 @@ if %errorlevel% neq 0 (
 echo ✓ Dependencies installed
 echo.
 
-echo [Step 4] Building React app...
+echo [Step 4] Building React app with Vite...
 call npm run build
 if %errorlevel% neq 0 (
     echo ERROR: Failed to build React app
     pause
     exit /b %errorlevel%
 )
-echo ✓ React app built
+echo ✓ React app built successfully
 echo.
 
-echo [Step 5] Packaging Electron app...
+echo [Step 5] Verifying build output...
+if not exist "dist\index.html" (
+    echo ERROR: dist\index.html not found!
+    echo Build may have failed.
+    pause
+    exit /b 1
+)
+echo ✓ Build output verified
+echo.
+
+echo [Step 6] Packaging Electron app...
 call npm run electron:build
 if %errorlevel% neq 0 (
     echo ERROR: Failed to package Electron app
@@ -54,14 +68,17 @@ if %errorlevel% neq 0 (
 echo ✓ Electron app packaged
 echo.
 
-echo [Step 6] Build complete!
+echo [Step 7] Build complete!
 echo.
 echo ===============================================
-echo Your installer is ready in the 'dist' folder!
+echo Your installer is ready!
 echo ===============================================
 echo.
-echo Look for:
-echo - SS Mudyf Production Tracker Setup 1.0.0.exe
+echo Look for the installer in the 'release' folder:
+dir release\*.exe /b 2>nul
+if %errorlevel% neq 0 (
+    echo (No installer found - check for errors above)
+)
 echo.
 
 pause

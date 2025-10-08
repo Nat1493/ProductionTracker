@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
-const isDev = require('electron-is-dev');
 const fs = require('fs');
+
+// ✅ FIXED: More reliable dev check
+const isDev = !app.isPackaged;
 
 let store;
 let mainWindow;
@@ -14,23 +16,16 @@ const DEBOUNCE_DELAY = 1000;
 async function initStore() {
   const Store = (await import('electron-store')).default;
   
-  // Check if there's a custom data path saved
   const tempStore = new Store({ name: 'config' });
   customDataPath = tempStore.get('customDataPath');
   
-  // Initialize main store with custom path if set
-  const storeOptions = customDataPath 
-    ? { cwd: customDataPath }
-    : {};
-  
+  const storeOptions = customDataPath ? { cwd: customDataPath } : {};
   store = new Store(storeOptions);
   
-  // Set up file watching for real-time sync
   setupFileWatcher();
 }
 
 function setupFileWatcher() {
-  // Clean up existing watcher
   if (fileWatcher) {
     fileWatcher.close();
     fileWatcher = null;
@@ -38,32 +33,19 @@ function setupFileWatcher() {
 
   if (!store) return;
 
-  // Get the actual file path of the store
   const storePath = store.path;
   
   try {
-    // Watch for changes to the data file
     fileWatcher = fs.watch(storePath, { persistent: false }, (eventType, filename) => {
-      // Only process 'change' events
       if (eventType !== 'change') return;
       
-      // Check if enough time has passed since our last write
       const now = Date.now();
-      if (now - lastWriteTime < DEBOUNCE_DELAY) {
-        // This is likely our own write, ignore it
-        return;
-      }
-      
-      // File was changed by another process/PC
-      console.log('Data file changed externally, notifying renderer...');
+      if (now - lastWriteTime < DEBOUNCE_DELAY) return;
       
       if (mainWindow && !mainWindow.isDestroyed()) {
-        // Notify the renderer process to reload data
         mainWindow.webContents.send('data-file-changed');
       }
     });
-    
-    console.log(`Watching file: ${storePath}`);
   } catch (error) {
     console.error('Error setting up file watcher:', error);
   }
@@ -85,31 +67,73 @@ function createWindow() {
     frame: true
   });
 
-  // FIXED: Better path handling for packaged app
-  let startUrl;
-  
+  // Show a startup message
+  console.log('=================================');
+  console.log('SS Mudyf Production Tracker');
+  console.log('=================================');
+  console.log('isDev:', isDev);
+  console.log('app.isPackaged:', app.isPackaged);
+  console.log('__dirname:', __dirname);
+  console.log('=================================');
+
   if (isDev) {
-    startUrl = 'http://localhost:5173';
-    console.log('Development mode - loading from:', startUrl);
+    // Development mode - load from Vite dev server
+    console.log('🔧 Loading from development server');
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools();
   } else {
-    // In production, load from the packaged files
-    startUrl = `file://${path.join(__dirname, '../dist/index.html')}`;
-    console.log('Production mode - loading from:', startUrl);
-    console.log('File exists:', fs.existsSync(path.join(__dirname, '../dist/index.html')));
+    // Production mode - load from built files
+    console.log('🚀 Loading from built files');
+    
+    const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
+    console.log('📂 Index path:', indexPath);
+    console.log('📂 File exists:', fs.existsSync(indexPath));
+    
+    if (!fs.existsSync(indexPath)) {
+      dialog.showErrorBox(
+        'File Not Found',
+        `Cannot find index.html at:\n${indexPath}\n\n` +
+        `Please reinstall the application.`
+      );
+      app.quit();
+      return;
+    }
+    
+    // Load the file
+    mainWindow.loadFile(indexPath).then(() => {
+      console.log('✅ Successfully loaded application');
+    }).catch((error) => {
+      console.error('❌ Failed to load:', error);
+      dialog.showErrorBox(
+        'Load Error',
+        `Failed to load the application:\n${error.message}`
+      );
+    });
   }
+
+  // Error handling
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error('❌ Load failed:', errorCode, errorDescription);
+    
+    // Don't show error for dev server connection refused (expected when dev server isn't running)
+    if (isDev && errorCode === -102) {
+      dialog.showErrorBox(
+        'Development Server Not Running',
+        'Please start the Vite development server first:\n\nnpm run dev'
+      );
+    } else if (!isDev) {
+      dialog.showErrorBox(
+        'Load Error',
+        `Error: ${errorDescription}\nCode: ${errorCode}\nURL: ${validatedURL}`
+      );
+    }
+  });
   
-  mainWindow.loadURL(startUrl);
-
-  // ALWAYS open DevTools for debugging
-  mainWindow.webContents.openDevTools();
-
-  // Log any loading errors
-  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-    console.error('Failed to load:', errorCode, errorDescription);
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('✅ Page finished loading successfully');
   });
 
   mainWindow.on('closed', () => {
-    // Clean up file watcher
     if (fileWatcher) {
       fileWatcher.close();
       fileWatcher = null;
@@ -118,9 +142,8 @@ function createWindow() {
   });
 }
 
-// App lifecycle events
 app.whenReady().then(async () => {
-  await initStore(); // Initialize store first
+  await initStore();
   createWindow();
 
   app.on('activate', () => {
@@ -131,7 +154,6 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  // Clean up file watcher
   if (fileWatcher) {
     fileWatcher.close();
     fileWatcher = null;
@@ -142,7 +164,7 @@ app.on('window-all-closed', () => {
   }
 });
 
-// IPC handler for folder selection
+// IPC handlers
 ipcMain.handle('select-folder', async () => {
   try {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -157,7 +179,6 @@ ipcMain.handle('select-folder', async () => {
 
     const selectedPath = result.filePaths[0];
     
-    // Test if we can write to this folder
     const testFile = path.join(selectedPath, '.ss-mudyf-test');
     try {
       fs.writeFileSync(testFile, 'test');
@@ -166,7 +187,6 @@ ipcMain.handle('select-folder', async () => {
       throw new Error(`Cannot write to selected folder: ${err.message}`);
     }
 
-    // Save the custom path to config store
     const Store = (await import('electron-store')).default;
     const configStore = new Store({ name: 'config' });
     configStore.set('customDataPath', selectedPath);
@@ -178,14 +198,12 @@ ipcMain.handle('select-folder', async () => {
   }
 });
 
-// IPC handlers for data persistence
 ipcMain.handle('store-get', (event, key) => {
   return store ? store.get(key) : null;
 });
 
 ipcMain.handle('store-set', (event, key, value) => {
   if (store) {
-    // Update last write time to prevent self-triggering
     lastWriteTime = Date.now();
     store.set(key, value);
     return true;
