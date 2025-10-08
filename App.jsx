@@ -1,18 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plus, Calendar, Package, TrendingUp, X, Edit2, Save, Settings, Trash2, Target, Archive, CheckCircle } from 'lucide-react';
 
 const App = () => {
-  // Load data from localStorage or use defaults
-  const loadFromStorage = (key, defaultValue) => {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : defaultValue;
-    } catch {
-      return defaultValue;
+  // Check if running in Electron
+  const isElectron = window.electronStore !== undefined;
+
+  // Storage helper functions
+  const loadFromStorage = async (key, defaultValue) => {
+    if (isElectron) {
+      const value = await window.electronStore.get(key);
+      return value !== undefined ? value : defaultValue;
+    }
+    return defaultValue;
+  };
+
+  const saveToStorage = async (key, value) => {
+    if (isElectron) {
+      await window.electronStore.set(key, value);
     }
   };
 
-  const [orders, setOrders] = useState(() => loadFromStorage('orders', [
+  const [orders, setOrders] = useState([
     {
       id: 1,
       orderNumber: 'ORD-001',
@@ -20,6 +28,11 @@ const App = () => {
       garmentType: 'T-Shirts',
       quantity: 5000,
       dailyTarget: 650,
+      unitPrice: 8.50,
+      image: '',
+      complexity: 'easy',
+      priority: 'high',
+      notes: 'Cotton blend, standard sizing',
       linesAssigned: ['Line 1'],
       startDate: '2025-10-08',
       endDate: '2025-10-15',
@@ -27,20 +40,20 @@ const App = () => {
       color: '#3B82F6',
       dailyProduction: {}
     }
-  ]));
+  ]);
 
-  const [completedOrders, setCompletedOrders] = useState(() => loadFromStorage('completedOrders', []));
+  const [completedOrders, setCompletedOrders] = useState([]);
 
-  const [productionLines, setProductionLines] = useState(() => loadFromStorage('productionLines', [
+  const [productionLines, setProductionLines] = useState([
     { id: 1, name: 'Line 1' },
     { id: 2, name: 'Line 2' },
     { id: 3, name: 'Line 3' },
     { id: 4, name: 'Line 4' },
     { id: 5, name: 'Line 5' }
-  ]));
+  ]);
 
-  const [excludeWeekends, setExcludeWeekends] = useState(() => loadFromStorage('excludeWeekends', true));
-  const [holidays, setHolidays] = useState(() => loadFromStorage('holidays', []));
+  const [excludeWeekends, setExcludeWeekends] = useState(true);
+  const [holidays, setHolidays] = useState([]);
   const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
 
   const [showOrderForm, setShowOrderForm] = useState(false);
@@ -59,6 +72,11 @@ const App = () => {
     garmentType: '',
     quantity: '',
     dailyTarget: '',
+    unitPrice: '',
+    image: '',
+    complexity: 'medium',
+    priority: 'medium',
+    notes: '',
     linesAssigned: [],
     startDate: '',
     endDate: '',
@@ -67,28 +85,48 @@ const App = () => {
     dailyProduction: {}
   });
 
-  const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
+  // Load data from Electron store on mount
+  React.useEffect(() => {
+    const loadData = async () => {
+      if (isElectron) {
+        const savedOrders = await loadFromStorage('orders', null);
+        const savedCompleted = await loadFromStorage('completedOrders', []);
+        const savedLines = await loadFromStorage('productionLines', null);
+        const savedWeekends = await loadFromStorage('excludeWeekends', true);
+        const savedHolidays = await loadFromStorage('holidays', []);
 
-  // Save to localStorage whenever data changes
-  useEffect(() => {
-    localStorage.setItem('orders', JSON.stringify(orders));
+        if (savedOrders) setOrders(savedOrders);
+        if (savedCompleted) setCompletedOrders(savedCompleted);
+        if (savedLines) setProductionLines(savedLines);
+        setExcludeWeekends(savedWeekends);
+        setHolidays(savedHolidays);
+      }
+    };
+    loadData();
+  }, []);
+
+  // Save orders to Electron store
+  React.useEffect(() => {
+    saveToStorage('orders', orders);
   }, [orders]);
 
-  useEffect(() => {
-    localStorage.setItem('completedOrders', JSON.stringify(completedOrders));
+  React.useEffect(() => {
+    saveToStorage('completedOrders', completedOrders);
   }, [completedOrders]);
 
-  useEffect(() => {
-    localStorage.setItem('productionLines', JSON.stringify(productionLines));
+  React.useEffect(() => {
+    saveToStorage('productionLines', productionLines);
   }, [productionLines]);
 
-  useEffect(() => {
-    localStorage.setItem('excludeWeekends', JSON.stringify(excludeWeekends));
+  React.useEffect(() => {
+    saveToStorage('excludeWeekends', excludeWeekends);
   }, [excludeWeekends]);
 
-  useEffect(() => {
-    localStorage.setItem('holidays', JSON.stringify(holidays));
+  React.useEffect(() => {
+    saveToStorage('holidays', holidays);
   }, [holidays]);
+
+  const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
 
   const isHoliday = (date) => {
     return holidays.some(h => h.date === date);
@@ -123,6 +161,11 @@ const App = () => {
         garmentType: '',
         quantity: '',
         dailyTarget: '',
+        unitPrice: '',
+        image: '',
+        complexity: 'medium',
+        priority: 'medium',
+        notes: '',
         linesAssigned: [],
         startDate: '',
         endDate: '',
@@ -353,6 +396,11 @@ const App = () => {
   const totalOrders = orders.length;
   const activeOrders = orders.filter(o => o.status === 'In Production').length;
   const totalQuantity = orders.reduce((sum, order) => sum + parseInt(order.quantity || 0), 0);
+  const totalValue = orders.reduce((sum, order) => {
+    const qty = parseInt(order.quantity || 0);
+    const price = parseFloat(order.unitPrice || 0);
+    return sum + (qty * price);
+  }, 0);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -423,7 +471,7 @@ const App = () => {
           {activeTab === 'active' ? (
             <>
               {/* Dashboard Stats */}
-              <div className="grid grid-cols-4 gap-4 mb-6">
+              <div className="grid grid-cols-5 gap-4 mb-6">
                 <div className="bg-white rounded-lg shadow-sm p-4 border">
                   <div className="flex items-center justify-between">
                     <div>
@@ -456,6 +504,18 @@ const App = () => {
                     </div>
                     <div className="bg-purple-100 rounded-lg p-2">
                       <Package className="text-purple-600" size={20} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-sm p-4 border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-600">Total Value</p>
+                      <p className="text-2xl font-bold text-emerald-600 mt-1">${totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                    </div>
+                    <div className="bg-emerald-100 rounded-lg p-2">
+                      <TrendingUp className="text-emerald-600" size={20} />
                     </div>
                   </div>
                 </div>
@@ -652,35 +712,76 @@ const App = () => {
               <h2 className="text-xl font-semibold mb-4">Completed Orders Archive</h2>
               <div className="space-y-3">
                 {completedOrders.map(order => {
-                  const targetStatus = checkTargetMet(order);
+                  const orderValue = (parseInt(order.quantity || 0) * parseFloat(order.unitPrice || 0));
                   return (
                     <div key={order.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                       <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className="w-1 h-16 rounded" style={{ backgroundColor: order.color }}></div>
-                            <div>
-                              <p className="font-bold text-gray-900">{order.orderNumber}</p>
-                              <p className="text-sm text-gray-600">{order.client}</p>
-                              <p className="text-xs text-gray-500">{order.garmentType}</p>
+                        <div className="flex-1 flex gap-3">
+                          <div className="w-1 h-20 rounded" style={{ backgroundColor: order.color }}></div>
+                          
+                          {order.image && (
+                            <img 
+                              src={order.image} 
+                              alt={order.garmentType}
+                              className="w-16 h-16 object-cover rounded border border-gray-200"
+                              onError={(e) => e.target.style.display = 'none'}
+                            />
+                          )}
+                          
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <div>
+                                <p className="font-bold text-gray-900">{order.orderNumber}</p>
+                                <p className="text-sm text-gray-600">{order.client}</p>
+                                <p className="text-xs text-gray-500">{order.garmentType}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                {order.priority && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                    order.priority === 'high' ? 'bg-red-100 text-red-700' :
+                                    order.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                    'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {order.priority.toUpperCase()}
+                                  </span>
+                                )}
+                                {order.complexity && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                    order.complexity === 'hard' ? 'bg-purple-100 text-purple-700' :
+                                    order.complexity === 'medium' ? 'bg-blue-100 text-blue-700' :
+                                    'bg-green-100 text-green-700'
+                                  }`}>
+                                    {order.complexity.toUpperCase()}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-4 text-sm ml-4">
-                            <div>
-                              <span className="text-gray-500">Quantity:</span>
-                              <span className="ml-2 font-medium">{parseInt(order.quantity).toLocaleString()} pcs</span>
+                            <div className="grid grid-cols-3 gap-4 text-sm ml-0">
+                              <div>
+                                <span className="text-gray-500">Quantity:</span>
+                                <span className="ml-2 font-medium">{parseInt(order.quantity).toLocaleString()} pcs</span>
+                              </div>
+                              {order.unitPrice && (
+                                <div>
+                                  <span className="text-gray-500">Value:</span>
+                                  <span className="ml-2 font-semibold text-emerald-600">${orderValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                </div>
+                              )}
+                              <div>
+                                <span className="text-gray-500">Lines:</span>
+                                <span className="ml-2 font-medium">{order.linesAssigned.join(', ')}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Completed:</span>
+                                <span className="ml-2 font-medium">{order.completedDate}</span>
+                              </div>
                             </div>
-                            <div>
-                              <span className="text-gray-500">Lines:</span>
-                              <span className="ml-2 font-medium">{order.linesAssigned.join(', ')}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Completed:</span>
-                              <span className="ml-2 font-medium">{order.completedDate}</span>
-                            </div>
+                            {order.notes && (
+                              <p className="text-xs text-gray-600 italic mt-2">{order.notes}</p>
+                            )}
                           </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 ml-4">
                           <button
                             onClick={() => handleRestoreOrder(order.id)}
                             className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -721,6 +822,7 @@ const App = () => {
           <div className="p-4 space-y-3">
             {orders.map(order => {
               const targetStatus = checkTargetMet(order);
+              const orderValue = (parseInt(order.quantity || 0) * parseFloat(order.unitPrice || 0));
 
               return (
                 <div key={order.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:border-gray-300 transition-colors">
@@ -756,10 +858,50 @@ const App = () => {
                       />
                       <input
                         type="number"
+                        step="0.01"
+                        value={editingOrder.unitPrice}
+                        onChange={(e) => setEditingOrder({...editingOrder, unitPrice: e.target.value})}
+                        className="w-full px-2 py-1 border rounded text-xs"
+                        placeholder="Unit Price"
+                      />
+                      <input
+                        type="text"
+                        value={editingOrder.image}
+                        onChange={(e) => setEditingOrder({...editingOrder, image: e.target.value})}
+                        className="w-full px-2 py-1 border rounded text-xs"
+                        placeholder="Image URL"
+                      />
+                      <select
+                        value={editingOrder.complexity}
+                        onChange={(e) => setEditingOrder({...editingOrder, complexity: e.target.value})}
+                        className="w-full px-2 py-1 border rounded text-xs"
+                      >
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
+                      <select
+                        value={editingOrder.priority}
+                        onChange={(e) => setEditingOrder({...editingOrder, priority: e.target.value})}
+                        className="w-full px-2 py-1 border rounded text-xs"
+                      >
+                        <option value="low">Low Priority</option>
+                        <option value="medium">Medium Priority</option>
+                        <option value="high">High Priority</option>
+                      </select>
+                      <input
+                        type="number"
                         value={editingOrder.dailyTarget}
                         onChange={(e) => setEditingOrder({...editingOrder, dailyTarget: e.target.value})}
                         className="w-full px-2 py-1 border rounded text-xs"
                         placeholder="Daily Target (pcs/line/day)"
+                      />
+                      <textarea
+                        value={editingOrder.notes}
+                        onChange={(e) => setEditingOrder({...editingOrder, notes: e.target.value})}
+                        className="w-full px-2 py-1 border rounded text-xs"
+                        placeholder="Notes"
+                        rows="2"
                       />
                       <div className="border rounded p-2">
                         <label className="block text-xs font-medium text-gray-700 mb-1">Production Lines:</label>
@@ -815,15 +957,25 @@ const App = () => {
                     </div>
                   ) : (
                     <div>
-                      <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-start gap-3 mb-2">
                         <div 
-                          className="w-1 h-12 rounded mr-3" 
+                          className="w-1 h-20 rounded flex-shrink-0" 
                           style={{ backgroundColor: order.color }}
                         ></div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <p className="font-bold text-gray-900 text-sm">{order.orderNumber}</p>
-                            <div className="flex gap-1">
+                        
+                        {order.image && (
+                          <img 
+                            src={order.image} 
+                            alt={order.garmentType}
+                            className="w-16 h-16 object-cover rounded border border-gray-200"
+                            onError={(e) => e.target.style.display = 'none'}
+                          />
+                        )}
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="font-bold text-gray-900 text-sm truncate">{order.orderNumber}</p>
+                            <div className="flex gap-1 flex-shrink-0 ml-2">
                               <button
                                 onClick={() => handleCompleteOrder(order.id)}
                                 className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
@@ -845,7 +997,27 @@ const App = () => {
                               </button>
                             </div>
                           </div>
-                          <p className="text-xs text-gray-600 font-medium">{order.client}</p>
+                          <p className="text-xs text-gray-600 font-medium truncate">{order.client}</p>
+                          <div className="flex gap-2 mt-1">
+                            {order.priority && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                order.priority === 'high' ? 'bg-red-100 text-red-700' :
+                                order.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                'bg-gray-100 text-gray-700'
+                              }`}>
+                                {order.priority.toUpperCase()}
+                              </span>
+                            )}
+                            {order.complexity && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                order.complexity === 'hard' ? 'bg-purple-100 text-purple-700' :
+                                order.complexity === 'medium' ? 'bg-blue-100 text-blue-700' :
+                                'bg-green-100 text-green-700'
+                              }`}>
+                                {order.complexity.toUpperCase()}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       
@@ -858,6 +1030,18 @@ const App = () => {
                           <span className="text-gray-500">Quantity:</span>
                           <span className="font-medium text-gray-900">{parseInt(order.quantity).toLocaleString()} pcs</span>
                         </div>
+                        {order.unitPrice && (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Unit Price:</span>
+                              <span className="font-medium text-gray-900">${parseFloat(order.unitPrice).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Order Value:</span>
+                              <span className="font-semibold text-emerald-600">${orderValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                            </div>
+                          </>
+                        )}
                         <div className="flex justify-between">
                           <span className="text-gray-500">Lines:</span>
                           <span className="font-medium text-gray-900">{order.linesAssigned.join(', ')}</span>
@@ -887,6 +1071,12 @@ const App = () => {
                               </span>
                             </div>
                           </>
+                        )}
+                        {order.notes && (
+                          <div className="pt-1 border-t border-gray-200">
+                            <span className="text-gray-500">Notes:</span>
+                            <p className="text-gray-700 mt-0.5 text-[11px] italic">{order.notes}</p>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1168,6 +1358,20 @@ const App = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Unit Price ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={newOrder.unitPrice}
+                    onChange={(e) => setNewOrder({...newOrder, unitPrice: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="e.g., 8.50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Daily Target (pcs/line/day)
                   </label>
                   <input
@@ -1177,6 +1381,36 @@ const App = () => {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="e.g., 650"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Complexity
+                  </label>
+                  <select
+                    value={newOrder.complexity}
+                    onChange={(e) => setNewOrder({...newOrder, complexity: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Priority
+                  </label>
+                  <select
+                    value={newOrder.priority}
+                    onChange={(e) => setNewOrder({...newOrder, priority: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
                 </div>
 
                 <div>
@@ -1191,6 +1425,19 @@ const App = () => {
                     <option value="Pending">Pending</option>
                     <option value="In Production">In Production</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Image URL
+                  </label>
+                  <input
+                    type="text"
+                    value={newOrder.image}
+                    onChange={(e) => setNewOrder({...newOrder, image: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="https://example.com/image.jpg"
+                  />
                 </div>
 
                 <div>
@@ -1220,6 +1467,19 @@ const App = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Notes / Specifications
+                </label>
+                <textarea
+                  value={newOrder.notes}
+                  onChange={(e) => setNewOrder({...newOrder, notes: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Additional notes about the order..."
+                  rows="3"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Production Lines * (Select one or more)
                 </label>
                 <div className="border border-gray-300 rounded-lg p-4 max-h-48 overflow-y-auto bg-gray-50">
@@ -1243,6 +1503,17 @@ const App = () => {
                   </p>
                 )}
               </div>
+
+              {newOrder.quantity && newOrder.unitPrice && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-700">Estimated Order Value:</span>
+                    <span className="text-xl font-bold text-blue-600">
+                      ${(parseFloat(newOrder.quantity) * parseFloat(newOrder.unitPrice)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-4">
                 <button
