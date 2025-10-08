@@ -7,3 +7,7 @@ contextBridge.exposeInMainWorld('electronStore', {
   delete: (key) => ipcRenderer.invoke('store-delete', key),
   clear: () => ipcRenderer.invoke('store-clear')
 });
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  selectFolder: () => ipcRenderer.invoke('select-folder')
+});
