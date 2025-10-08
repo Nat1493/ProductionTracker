@@ -76,6 +76,8 @@ const App = () => {
   const [showDailyReport, setShowDailyReport] = useState(false);
   const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
   const [showFolderSettings, setShowFolderSettings] = useState(false);
+  const [showSyncNotification, setShowSyncNotification] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [customFolder, setCustomFolder] = useState('');
   const [timelineStartDate, setTimelineStartDate] = useState(() => {
     // Start from current week's Monday
@@ -132,6 +134,62 @@ const App = () => {
     };
     loadData();
   }, []);
+
+  React.useEffect(() => {
+  if (!isElectron) return;
+
+    const handleDataFileChanged = async () => {
+      console.log('🔄 Data file changed by another PC, reloading...');
+      setIsSyncing(true);
+      
+      try {
+        // Small delay to ensure file write is complete
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Reload all data from storage
+        const savedOrders = await loadFromStorage('orders', null);
+        const savedCompleted = await loadFromStorage('completedOrders', []);
+        const savedLines = await loadFromStorage('productionLines', null);
+        const savedWeekends = await loadFromStorage('excludeWeekends', true);
+        const savedHolidays = await loadFromStorage('holidays', []);
+        const savedWorkingHours = await loadFromStorage('workingHours', 10);
+        const savedWorkStartHour = await loadFromStorage('workStartHour', 7);
+        const savedCustomFolder = await loadFromStorage('customFolder', '');
+
+        // Update all state
+        if (savedOrders) setOrders(savedOrders);
+        if (savedCompleted) setCompletedOrders(savedCompleted);
+        if (savedLines) setProductionLines(savedLines);
+        setExcludeWeekends(savedWeekends);
+        setHolidays(savedHolidays);
+        setWorkingHours(savedWorkingHours);
+        setWorkStartHour(savedWorkStartHour);
+        setCustomFolder(savedCustomFolder);
+
+        // Show notification
+        setShowSyncNotification(true);
+        setTimeout(() => setShowSyncNotification(false), 3000);
+        
+        console.log('✅ Data reloaded successfully from external change');
+      } catch (error) {
+        console.error('❌ Error reloading data:', error);
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+
+    // Register the listener
+    if (window.electronAPI && window.electronAPI.onDataFileChanged) {
+      window.electronAPI.onDataFileChanged(handleDataFileChanged);
+    }
+
+    // Cleanup listener on unmount
+    return () => {
+      if (window.electronAPI && window.electronAPI.removeDataFileChangedListener) {
+        window.electronAPI.removeDataFileChangedListener(handleDataFileChanged);
+      }
+    };
+  }, [isElectron]);
 
   React.useEffect(() => {
     saveToStorage('orders', orders);
@@ -647,6 +705,40 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Real-time Sync Notification */}
+      {showSyncNotification && (
+        <div className="fixed top-4 right-4 z-50 animate-fade-in">
+          <div className="bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
+            <div className="flex items-center justify-center">
+              <span className="text-2xl">🔄</span>
+            </div>
+            <div>
+              <p className="font-semibold">Data Updated</p>
+              <p className="text-sm">Changes from another PC loaded</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Syncing Indicator */}
+      {isSyncing && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <div className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 text-sm">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            <span>Syncing data...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Multi-PC Status Indicator */}
+      {isElectron && customFolder && (
+        <div className="fixed bottom-4 left-4 z-40">
+          <div className="bg-gray-800 text-white px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-2 text-xs">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            <span>Multi-PC sync active</span>
+          </div>
+        </div>
+      )}
       <div className="bg-white shadow-sm border-b">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">

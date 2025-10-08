@@ -9,5 +9,15 @@ contextBridge.exposeInMainWorld('electronStore', {
 });
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  selectFolder: () => ipcRenderer.invoke('select-folder')
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  
+  // Listen for data file changes from other PCs
+  onDataFileChanged: (callback) => {
+    ipcRenderer.on('data-file-changed', callback);
+  },
+  
+  // Clean up listener when component unmounts
+  removeDataFileChangedListener: (callback) => {
+    ipcRenderer.removeListener('data-file-changed', callback);
+  }
 });
