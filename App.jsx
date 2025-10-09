@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Calendar, Package, TrendingUp, X, Edit2, Save, Settings, Trash2, Target, Archive, CheckCircle, Clock, Upload } from 'lucide-react';
+import { Plus, Calendar, Package, TrendingUp, X, Edit2, Save, Settings, Trash2, Target, Archive, CheckCircle, Clock, Upload, ClipboardList, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 
 const App = () => {
   const isElectron = window.electronStore !== undefined;
@@ -32,18 +32,21 @@ const App = () => {
       priority: 'high',
       notes: 'Cotton blend, standard sizing',
       linesAssigned: ['Line 1'],
+      lineSchedules: {
+        'Line 1': { startDate: '2025-10-08', endDate: '2025-10-15' }
+      },
       startDate: '2025-10-08',
       endDate: '2025-10-15',
       status: 'In Production',
       color: '#3B82F6',
       dailyProduction: {},
       hourlyProduction: {},
-      hourlyRejects: {}
+      hourlyRejects: {},
+      trims: []
     }
   ]);
 
   const [completedOrders, setCompletedOrders] = useState([]);
-
   const [productionLines, setProductionLines] = useState([
     { id: 1, name: 'Line 1', operators: 10 },
     { id: 2, name: 'Line 2', operators: 10 },
@@ -56,13 +59,20 @@ const App = () => {
   const [holidays, setHolidays] = useState([]);
   const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
   const [workingHours, setWorkingHours] = useState(10);
-  const [workStartHour, setWorkStartHour] = useState(7); // Start at 7 AM
+  const [workStartHour, setWorkStartHour] = useState(7);
 
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [showLineManager, setShowLineManager] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showProductionInput, setShowProductionInput] = useState(false);
   const [showHourlyInput, setShowHourlyInput] = useState(false);
+  const [showTrimsManager, setShowTrimsManager] = useState(false);
+  const [showLineSchedule, setShowLineSchedule] = useState(false);
+  const [selectedOrderForTrims, setSelectedOrderForTrims] = useState(null);
+  const [selectedOrderForSchedule, setSelectedOrderForSchedule] = useState(null);
+  const [showStatsCards, setShowStatsCards] = useState(false);
+  const [showLineCapacity, setShowLineCapacity] = useState(false);
+  const [showOrdersPanel, setShowOrdersPanel] = useState(false);
   const [selectedCell, setSelectedCell] = useState(null);
   const [selectedHourlyCell, setSelectedHourlyCell] = useState(null);
   const [productionInput, setProductionInput] = useState('');
@@ -75,18 +85,25 @@ const App = () => {
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showDailyReport, setShowDailyReport] = useState(false);
   const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
-  const [showFolderSettings, setShowFolderSettings] = useState(false);
   const [showSyncNotification, setShowSyncNotification] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [customFolder, setCustomFolder] = useState('');
   const [timelineStartDate, setTimelineStartDate] = useState(() => {
-    // Start from current week's Monday
     const today = new Date();
     const dayOfWeek = today.getDay();
-    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // If Sunday, go back 6 days, else go to Monday
+    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const monday = new Date(today);
     monday.setDate(today.getDate() + diff);
     return monday.toISOString().split('T')[0];
+  });
+
+  const [newTrimItem, setNewTrimItem] = useState({
+    name: '',
+    quantityRequired: '',
+    quantityReceived: '',
+    unit: 'pcs',
+    supplier: '',
+    notes: ''
   });
 
   const [newOrder, setNewOrder] = useState({
@@ -101,13 +118,15 @@ const App = () => {
     priority: 'medium',
     notes: '',
     linesAssigned: [],
+    lineSchedules: {},
     startDate: '',
     endDate: '',
     status: 'Pending',
     color: '#8B5CF6',
     dailyProduction: {},
     hourlyProduction: {},
-    hourlyRejects: {}
+    hourlyRejects: {},
+    trims: []
   });
 
   React.useEffect(() => {
@@ -136,17 +155,11 @@ const App = () => {
   }, []);
 
   React.useEffect(() => {
-  if (!isElectron) return;
-
+    if (!isElectron) return;
     const handleDataFileChanged = async () => {
-      console.log('🔄 Data file changed by another PC, reloading...');
       setIsSyncing(true);
-      
       try {
-        // Small delay to ensure file write is complete
         await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // Reload all data from storage
         const savedOrders = await loadFromStorage('orders', null);
         const savedCompleted = await loadFromStorage('completedOrders', []);
         const savedLines = await loadFromStorage('productionLines', null);
@@ -156,7 +169,6 @@ const App = () => {
         const savedWorkStartHour = await loadFromStorage('workStartHour', 7);
         const savedCustomFolder = await loadFromStorage('customFolder', '');
 
-        // Update all state
         if (savedOrders) setOrders(savedOrders);
         if (savedCompleted) setCompletedOrders(savedCompleted);
         if (savedLines) setProductionLines(savedLines);
@@ -166,24 +178,19 @@ const App = () => {
         setWorkStartHour(savedWorkStartHour);
         setCustomFolder(savedCustomFolder);
 
-        // Show notification
         setShowSyncNotification(true);
         setTimeout(() => setShowSyncNotification(false), 3000);
-        
-        console.log('✅ Data reloaded successfully from external change');
       } catch (error) {
-        console.error('❌ Error reloading data:', error);
+        console.error('Error reloading data:', error);
       } finally {
         setIsSyncing(false);
       }
     };
 
-    // Register the listener
     if (window.electronAPI && window.electronAPI.onDataFileChanged) {
       window.electronAPI.onDataFileChanged(handleDataFileChanged);
     }
 
-    // Cleanup listener on unmount
     return () => {
       if (window.electronAPI && window.electronAPI.removeDataFileChangedListener) {
         window.electronAPI.removeDataFileChangedListener(handleDataFileChanged);
@@ -191,40 +198,16 @@ const App = () => {
     };
   }, [isElectron]);
 
-  React.useEffect(() => {
-    saveToStorage('orders', orders);
-  }, [orders]);
-
-  React.useEffect(() => {
-    saveToStorage('completedOrders', completedOrders);
-  }, [completedOrders]);
-
-  React.useEffect(() => {
-    saveToStorage('productionLines', productionLines);
-  }, [productionLines]);
-
-  React.useEffect(() => {
-    saveToStorage('excludeWeekends', excludeWeekends);
-  }, [excludeWeekends]);
-
-  React.useEffect(() => {
-    saveToStorage('holidays', holidays);
-  }, [holidays]);
-
-  React.useEffect(() => {
-    saveToStorage('workingHours', workingHours);
-  }, [workingHours]);
-
-  React.useEffect(() => {
-    saveToStorage('workStartHour', workStartHour);
-  }, [workStartHour]);
-
-  React.useEffect(() => {
-    saveToStorage('customFolder', customFolder);
-  }, [customFolder]);
+  React.useEffect(() => { saveToStorage('orders', orders); }, [orders]);
+  React.useEffect(() => { saveToStorage('completedOrders', completedOrders); }, [completedOrders]);
+  React.useEffect(() => { saveToStorage('productionLines', productionLines); }, [productionLines]);
+  React.useEffect(() => { saveToStorage('excludeWeekends', excludeWeekends); }, [excludeWeekends]);
+  React.useEffect(() => { saveToStorage('holidays', holidays); }, [holidays]);
+  React.useEffect(() => { saveToStorage('workingHours', workingHours); }, [workingHours]);
+  React.useEffect(() => { saveToStorage('workStartHour', workStartHour); }, [workStartHour]);
+  React.useEffect(() => { saveToStorage('customFolder', customFolder); }, [customFolder]);
 
   const handleSelectFolder = async () => {
-    // Check multiple possible APIs
     if (typeof window !== 'undefined' && window.electronAPI && typeof window.electronAPI.selectFolder === 'function') {
       try {
         const folder = await window.electronAPI.selectFolder();
@@ -237,9 +220,9 @@ const App = () => {
         alert('Error selecting folder. Please check console for details.');
       }
     } else if (isElectron) {
-      alert('⚠️ Folder selection API not available.\n\nPlease update your electron/preload.js file with:\n\ncontextBridge.exposeInMainWorld(\'electronAPI\', {\n  selectFolder: () => ipcRenderer.invoke(\'select-folder\')\n});');
+      alert('⚠️ Folder selection API not available.');
     } else {
-      alert('📱 Folder selection is only available in the desktop app.\n\nPlease use the Electron desktop version to access this feature.');
+      alert('📱 Folder selection is only available in the desktop app.');
     }
   };
 
@@ -272,7 +255,7 @@ const App = () => {
         }
         
         csvContent += `\nTotal,${totalProduction},${totalRejects}\n`;
-        csvContent += `Target: ${checkTargetMet(order)?.dailyRequiredPerLine || 'N/A'} pcs\n`;
+        csvContent += `Target: ${order.dailyTarget || 'N/A'} pcs\n`;
         csvContent += `Reject Rate: ${totalProduction > 0 ? ((totalRejects / totalProduction) * 100).toFixed(2) : 0}%\n`;
       }
     });
@@ -301,14 +284,10 @@ const App = () => {
     return `${formatHour(startHour)}-${formatHour(endHour)}`;
   };
 
-  const isHoliday = (date) => {
-    return holidays.some(h => h.date === date);
-  };
-
+  const isHoliday = (date) => holidays.some(h => h.date === date);
   const isWorkingDay = (date) => {
     const d = new Date(date);
     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-    
     if (excludeWeekends && isWeekend) return false;
     if (isHoliday(date)) return false;
     return true;
@@ -340,9 +319,139 @@ const App = () => {
     setHolidays(holidays.filter(h => h.id !== id));
   };
 
+  // Trims Management Functions
+  const handleAddTrim = () => {
+    if (!selectedOrderForTrims || !newTrimItem.name || !newTrimItem.quantityRequired) return;
+    
+    const required = parseFloat(newTrimItem.quantityRequired);
+    const received = parseFloat(newTrimItem.quantityReceived) || 0;
+    
+    // Calculate initial status
+    let initialStatus = 'pending';
+    if (received === 0) {
+      initialStatus = 'pending';
+    } else if (received >= required) {
+      initialStatus = 'complete';
+    } else {
+      initialStatus = 'partial';
+    }
+    
+    const trim = {
+      id: Date.now(),
+      name: newTrimItem.name,
+      supplier: newTrimItem.supplier,
+      unit: newTrimItem.unit,
+      notes: newTrimItem.notes,
+      quantityRequired: required,
+      quantityReceived: received,
+      status: initialStatus
+    };
+
+    setOrders(orders.map(order => {
+      if (order.id === selectedOrderForTrims.id) {
+        return { ...order, trims: [...(order.trims || []), trim] };
+      }
+      return order;
+    }));
+
+    setNewTrimItem({
+      name: '',
+      quantityRequired: '',
+      quantityReceived: '',
+      unit: 'pcs',
+      supplier: '',
+      notes: ''
+    });
+  };
+
+  const handleUpdateTrim = (trimId, field, value) => {
+    setOrders(orders.map(order => {
+      if (order.id === selectedOrderForTrims.id) {
+        return {
+          ...order,
+          trims: order.trims.map(trim => {
+            if (trim.id === trimId) {
+              // Parse value as number for quantity fields
+              const numValue = (field === 'quantityReceived' || field === 'quantityRequired') 
+                ? parseFloat(value) || 0 
+                : value;
+              
+              const updated = { ...trim, [field]: numValue };
+              
+              // Auto-update status when quantities change
+              if (field === 'quantityReceived' || field === 'quantityRequired') {
+                const received = field === 'quantityReceived' ? numValue : trim.quantityReceived;
+                const required = field === 'quantityRequired' ? numValue : trim.quantityRequired;
+                
+                if (received === 0) {
+                  updated.status = 'pending';
+                } else if (received >= required) {
+                  updated.status = 'complete';
+                } else {
+                  updated.status = 'partial';
+                }
+              }
+              return updated;
+            }
+            return trim;
+          })
+        };
+      }
+      return order;
+    }));
+  };
+
+  const handleDeleteTrim = (trimId) => {
+    setOrders(orders.map(order => {
+      if (order.id === selectedOrderForTrims.id) {
+        return {
+          ...order,
+          trims: order.trims.filter(trim => trim.id !== trimId)
+        };
+      }
+      return order;
+    }));
+  };
+
+  const getTrimsStatus = (order) => {
+    if (!order.trims || order.trims.length === 0) return { status: 'none', message: 'No trims' };
+    
+    const total = order.trims.length;
+    const complete = order.trims.filter(t => t.status === 'complete').length;
+    const pending = order.trims.filter(t => t.status === 'pending').length;
+    const partial = order.trims.filter(t => t.status === 'partial').length;
+    const shortage = order.trims.filter(t => {
+      const received = t.quantityReceived || 0;
+      return received < t.quantityRequired;
+    });
+
+    if (complete === total) return { status: 'complete', message: `✓ All ${total} trims received`, shortage: [] };
+    if (pending === total) return { status: 'pending', message: `⚠ ${total} trims pending`, shortage };
+    return { status: 'partial', message: `${complete}/${total} complete`, shortage };
+  };
+
   const handleAddOrder = () => {
     if (newOrder.orderNumber && newOrder.client && newOrder.startDate && newOrder.endDate && newOrder.linesAssigned.length > 0) {
-      setOrders([...orders, { ...newOrder, id: Date.now(), dailyProduction: {}, hourlyProduction: {}, hourlyRejects: {} }]);
+      // Initialize line schedules if not already set
+      const lineSchedules = newOrder.lineSchedules || {};
+      newOrder.linesAssigned.forEach(lineName => {
+        if (!lineSchedules[lineName]) {
+          lineSchedules[lineName] = {
+            startDate: newOrder.startDate,
+            endDate: newOrder.endDate
+          };
+        }
+      });
+      
+      setOrders([...orders, { 
+        ...newOrder, 
+        id: Date.now(), 
+        dailyProduction: {}, 
+        hourlyProduction: {}, 
+        hourlyRejects: {},
+        trims: [],
+        lineSchedules
+      }]);
       setNewOrder({
         orderNumber: '',
         client: '',
@@ -355,13 +464,15 @@ const App = () => {
         priority: 'medium',
         notes: '',
         linesAssigned: [],
+        lineSchedules: {},
         startDate: '',
         endDate: '',
         status: 'Pending',
         color: colors[Math.floor(Math.random() * colors.length)],
         dailyProduction: {},
         hourlyProduction: {},
-        hourlyRejects: {}
+        hourlyRejects: {},
+        trims: []
       });
       setShowOrderForm(false);
     }
@@ -432,20 +543,90 @@ const App = () => {
 
   const toggleLineSelection = (lineName, isNewOrder = true) => {
     if (isNewOrder) {
-      setNewOrder(prev => ({
-        ...prev,
-        linesAssigned: prev.linesAssigned.includes(lineName)
+      setNewOrder(prev => {
+        const isCurrentlySelected = prev.linesAssigned.includes(lineName);
+        const newLinesAssigned = isCurrentlySelected
           ? prev.linesAssigned.filter(l => l !== lineName)
-          : [...prev.linesAssigned, lineName]
-      }));
+          : [...prev.linesAssigned, lineName];
+        
+        // Initialize line schedules when toggling
+        const newLineSchedules = { ...prev.lineSchedules };
+        if (!isCurrentlySelected) {
+          // Adding line - set to order dates
+          newLineSchedules[lineName] = {
+            startDate: prev.startDate || '',
+            endDate: prev.endDate || ''
+          };
+        } else {
+          // Removing line - delete schedule
+          delete newLineSchedules[lineName];
+        }
+        
+        return {
+          ...prev,
+          linesAssigned: newLinesAssigned,
+          lineSchedules: newLineSchedules
+        };
+      });
     } else {
-      setEditingOrder(prev => ({
-        ...prev,
-        linesAssigned: prev.linesAssigned.includes(lineName)
+      setEditingOrder(prev => {
+        const isCurrentlySelected = prev.linesAssigned.includes(lineName);
+        const newLinesAssigned = isCurrentlySelected
           ? prev.linesAssigned.filter(l => l !== lineName)
-          : [...prev.linesAssigned, lineName]
-      }));
+          : [...prev.linesAssigned, lineName];
+        
+        // Initialize line schedules when toggling
+        const newLineSchedules = { ...prev.lineSchedules } || {};
+        if (!isCurrentlySelected) {
+          // Adding line - set to order dates
+          newLineSchedules[lineName] = {
+            startDate: prev.startDate || '',
+            endDate: prev.endDate || ''
+          };
+        } else {
+          // Removing line - delete schedule
+          delete newLineSchedules[lineName];
+        }
+        
+        return {
+          ...prev,
+          linesAssigned: newLinesAssigned,
+          lineSchedules: newLineSchedules
+        };
+      });
     }
+  };
+
+  const handleUpdateLineSchedule = (lineName, field, value) => {
+    setOrders(orders.map(order => {
+      if (order.id === selectedOrderForSchedule.id) {
+        const updatedSchedules = { ...order.lineSchedules };
+        if (!updatedSchedules[lineName]) {
+          updatedSchedules[lineName] = { startDate: order.startDate, endDate: order.endDate };
+        }
+        updatedSchedules[lineName][field] = value;
+        
+        return { ...order, lineSchedules: updatedSchedules };
+      }
+      return order;
+    }));
+  };
+
+  const handleRemoveLineFromOrder = (orderId, lineName) => {
+    setOrders(orders.map(order => {
+      if (order.id === orderId) {
+        const newLinesAssigned = order.linesAssigned.filter(l => l !== lineName);
+        const newLineSchedules = { ...order.lineSchedules };
+        delete newLineSchedules[lineName];
+        
+        return {
+          ...order,
+          linesAssigned: newLinesAssigned,
+          lineSchedules: newLineSchedules
+        };
+      }
+      return order;
+    }));
   };
 
   const handleCellClick = (order, line, date) => {
@@ -460,7 +641,6 @@ const App = () => {
     if (!isWorkingDay(date)) return;
     setSelectedHourlyCell({ order, line, date });
     
-    // Initialize hourly inputs and rejects from existing data
     const initialInputs = {};
     const initialRejects = {};
     for (let hour = 1; hour <= workingHours; hour++) {
@@ -513,7 +693,6 @@ const App = () => {
         }
       }
       
-      // Calculate daily total from hourly data
       const dailyTotal = Object.values(hourlyInputs).reduce((sum, val) => sum + (parseInt(val) || 0), 0);
       const dailyKey = `${line}-${date}`;
       
@@ -541,7 +720,6 @@ const App = () => {
 
   const getHourlyTarget = (order) => {
     if (!order || !order.dailyTarget) return null;
-    // Use the user-set daily target per line, not the calculated required
     return Math.ceil(order.dailyTarget / workingHours);
   };
 
@@ -601,9 +779,9 @@ const App = () => {
   const navigateTimeline = (direction) => {
     const currentStart = new Date(timelineStartDate);
     if (direction === 'prev') {
-      currentStart.setDate(currentStart.getDate() - 7); // Go back 1 week
+      currentStart.setDate(currentStart.getDate() - 7);
     } else if (direction === 'next') {
-      currentStart.setDate(currentStart.getDate() + 7); // Go forward 1 week
+      currentStart.setDate(currentStart.getDate() + 7);
     } else if (direction === 'today') {
       const today = new Date();
       const dayOfWeek = today.getDay();
@@ -641,6 +819,17 @@ const App = () => {
   const isDateBooked = (lineName, date) => {
     return orders.some(order => {
       if (!order.linesAssigned.includes(lineName)) return false;
+      
+      // Check line-specific schedule if available
+      if (order.lineSchedules && order.lineSchedules[lineName]) {
+        const schedule = order.lineSchedules[lineName];
+        const scheduleStart = new Date(schedule.startDate);
+        const scheduleEnd = new Date(schedule.endDate);
+        const checkDate = new Date(date);
+        return checkDate >= scheduleStart && checkDate <= scheduleEnd;
+      }
+      
+      // Fallback to order-level dates
       const orderStart = new Date(order.startDate);
       const orderEnd = new Date(order.endDate);
       const checkDate = new Date(date);
@@ -651,6 +840,17 @@ const App = () => {
   const getOrderForDate = (lineName, date) => {
     return orders.find(order => {
       if (!order.linesAssigned.includes(lineName)) return false;
+      
+      // Check line-specific schedule if available
+      if (order.lineSchedules && order.lineSchedules[lineName]) {
+        const schedule = order.lineSchedules[lineName];
+        const scheduleStart = new Date(schedule.startDate);
+        const scheduleEnd = new Date(schedule.endDate);
+        const checkDate = new Date(date);
+        return checkDate >= scheduleStart && checkDate <= scheduleEnd;
+      }
+      
+      // Fallback to order-level dates
       const orderStart = new Date(order.startDate);
       const orderEnd = new Date(order.endDate);
       const checkDate = new Date(date);
@@ -683,10 +883,9 @@ const App = () => {
     
     if (actual === undefined) return null;
     
-    const targetStatus = checkTargetMet(order);
-    if (!targetStatus) return { actual, status: 'recorded' };
-    
-    const target = targetStatus.dailyRequiredPerLine;
+    // Use user-set daily target (same as scoreboard)
+    const target = order.dailyTarget;
+    if (!target) return { actual, status: 'recorded' };
     
     if (actual >= target) return { actual, status: 'met', target };
     if (actual >= target * 0.8) return { actual, status: 'close', target };
@@ -704,13 +903,10 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Real-time Sync Notification */}
       {showSyncNotification && (
         <div className="fixed top-4 right-4 z-50 animate-fade-in">
           <div className="bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
-            <div className="flex items-center justify-center">
-              <span className="text-2xl">🔄</span>
-            </div>
+            <span className="text-2xl">🔄</span>
             <div>
               <p className="font-semibold">Data Updated</p>
               <p className="text-sm">Changes from another PC loaded</p>
@@ -719,7 +915,6 @@ const App = () => {
         </div>
       )}
 
-      {/* Syncing Indicator */}
       {isSyncing && (
         <div className="fixed bottom-4 right-4 z-50">
           <div className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 text-sm">
@@ -729,7 +924,6 @@ const App = () => {
         </div>
       )}
 
-      {/* Multi-PC Status Indicator */}
       {isElectron && customFolder && (
         <div className="fixed bottom-4 left-4 z-40">
           <div className="bg-gray-800 text-white px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-2 text-xs">
@@ -738,12 +932,13 @@ const App = () => {
           </div>
         </div>
       )}
+
       <div className="bg-white shadow-sm border-b">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">SS Mudyf Production Tracker</h1>
-              <p className="text-sm text-gray-600 mt-1">Real-time production line scheduling with time-based hourly tracking</p>
+              <p className="text-sm text-gray-600 mt-1">Real-time production tracking with trims management</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -752,6 +947,13 @@ const App = () => {
               >
                 <Package size={20} />
                 Daily Report
+              </button>
+              <button
+                onClick={() => setShowOrdersPanel(true)}
+                className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                <ClipboardList size={20} />
+                Orders ({orders.length})
               </button>
               <button
                 onClick={() => setShowScoreboard(true)}
@@ -786,8 +988,8 @@ const App = () => {
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-80px)]">
-        <div className="flex-1 overflow-auto p-6">
+      <div className="h-[calc(100vh-80px)]">
+        <div className="h-full overflow-auto p-6">
           <div className="flex gap-2 mb-6">
             <button
               onClick={() => setActiveTab('active')}
@@ -815,66 +1017,118 @@ const App = () => {
 
           {activeTab === 'active' ? (
             <>
-              <div className="grid grid-cols-5 gap-4 mb-6">
-                <div className="bg-white rounded-lg shadow-sm p-4 border">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-600">Total Orders</p>
-                      <p className="text-2xl font-bold text-gray-900 mt-1">{totalOrders}</p>
+              {/* Collapsible Stats Cards */}
+              <div className="mb-4">
+                {showStatsCards ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-700">Overview Statistics</h3>
+                      <button
+                        onClick={() => setShowStatsCards(false)}
+                        className="text-xs text-gray-600 hover:text-gray-800 flex items-center gap-1 px-3 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                      >
+                        <span>Hide Stats</span>
+                        <X size={14} />
+                      </button>
                     </div>
-                    <div className="bg-blue-100 rounded-lg p-2">
-                      <Package className="text-blue-600" size={20} />
-                    </div>
-                  </div>
-                </div>
+                    <div className="grid grid-cols-5 gap-4">
+                      <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-gray-600">Total Orders</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">{totalOrders}</p>
+                          </div>
+                          <div className="bg-blue-100 rounded-lg p-2">
+                            <Package className="text-blue-600" size={20} />
+                          </div>
+                        </div>
+                      </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-4 border">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-600">Active Orders</p>
-                      <p className="text-2xl font-bold text-green-600 mt-1">{activeOrders}</p>
-                    </div>
-                    <div className="bg-green-100 rounded-lg p-2">
-                      <TrendingUp className="text-green-600" size={20} />
-                    </div>
-                  </div>
-                </div>
+                      <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-gray-600">Active Orders</p>
+                            <p className="text-2xl font-bold text-green-600 mt-1">{activeOrders}</p>
+                          </div>
+                          <div className="bg-green-100 rounded-lg p-2">
+                            <TrendingUp className="text-green-600" size={20} />
+                          </div>
+                        </div>
+                      </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-4 border">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-600">Total Quantity</p>
-                      <p className="text-2xl font-bold text-gray-900 mt-1">{totalQuantity.toLocaleString()}</p>
-                    </div>
-                    <div className="bg-purple-100 rounded-lg p-2">
-                      <Package className="text-purple-600" size={20} />
-                    </div>
-                  </div>
-                </div>
+                      <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-gray-600">Total Quantity</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">{totalQuantity.toLocaleString()}</p>
+                          </div>
+                          <div className="bg-purple-100 rounded-lg p-2">
+                            <Package className="text-purple-600" size={20} />
+                          </div>
+                        </div>
+                      </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-4 border">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-600">Total Value</p>
-                      <p className="text-2xl font-bold text-emerald-600 mt-1">E{totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
-                    </div>
-                    <div className="bg-emerald-100 rounded-lg p-2">
-                      <TrendingUp className="text-emerald-600" size={20} />
-                    </div>
-                  </div>
-                </div>
+                      <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-gray-600">Total Value</p>
+                            <p className="text-2xl font-bold text-emerald-600 mt-1">E{totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                          </div>
+                          <div className="bg-emerald-100 rounded-lg p-2">
+                            <TrendingUp className="text-emerald-600" size={20} />
+                          </div>
+                        </div>
+                      </div>
 
-                <div className="bg-white rounded-lg shadow-sm p-4 border">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-600">Production Lines</p>
-                      <p className="text-2xl font-bold text-gray-900 mt-1">{productionLines.length}</p>
-                    </div>
-                    <div className="bg-orange-100 rounded-lg p-2">
-                      <Calendar className="text-orange-600" size={20} />
+                      <div className="bg-white rounded-lg shadow-sm p-4 border">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-gray-600">Production Lines</p>
+                            <p className="text-2xl font-bold text-gray-900 mt-1">{productionLines.length}</p>
+                          </div>
+                          <div className="bg-orange-100 rounded-lg p-2">
+                            <Calendar className="text-orange-600" size={20} />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <button
+                    onClick={() => setShowStatsCards(true)}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-6 text-sm">
+                        <div className="flex items-center gap-2">
+                          <Package className="text-blue-600" size={18} />
+                          <span className="font-semibold text-gray-900">{totalOrders}</span>
+                          <span className="text-gray-600">orders</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="text-green-600" size={18} />
+                          <span className="font-semibold text-gray-900">{activeOrders}</span>
+                          <span className="text-gray-600">active</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Package className="text-purple-600" size={18} />
+                          <span className="font-semibold text-gray-900">{totalQuantity.toLocaleString()}</span>
+                          <span className="text-gray-600">pcs</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="text-emerald-600" size={18} />
+                          <span className="font-semibold text-emerald-600">E{totalValue.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="text-orange-600" size={18} />
+                          <span className="font-semibold text-gray-900">{productionLines.length}</span>
+                          <span className="text-gray-600">lines</span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-500">Click to expand stats</span>
+                    </div>
+                  </button>
+                )}
               </div>
 
               <div className="bg-white rounded-lg shadow-sm border">
@@ -892,7 +1146,6 @@ const App = () => {
                     </div>
                   </div>
 
-                  {/* Timeline Navigation */}
                   <div className="flex items-center justify-between mb-4 p-4 bg-gray-50 rounded-lg border">
                     <div className="flex items-center gap-2">
                       <button
@@ -933,44 +1186,88 @@ const App = () => {
                     </div>
                   </div>
                   
-                  <div className="mb-6 grid gap-3" style={{ gridTemplateColumns: `repeat(${productionLines.length}, minmax(0, 1fr))` }}>
-                    {productionLines.map(line => {
-                      const capacity = getLineCapacity(line.name);
-                      const lineOrders = orders.filter(o => o.linesAssigned.includes(line.name) && o.status === 'In Production');
-                      
-                      return (
-                        <div key={line.id} className="bg-gray-50 rounded-lg p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900">{line.name}</p>
-                              <p className="text-xs text-gray-500">👥 {line.operators || 0} operators</p>
-                            </div>
-                            <span className="text-xs text-gray-600">{lineOrders.length} orders</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 bg-gray-200 rounded-full h-2">
-                              <div
-                                className={`h-2 rounded-full transition-all ${
-                                  capacity >= 90 ? 'bg-red-500' :
-                                  capacity >= 70 ? 'bg-orange-500' :
-                                  'bg-green-500'
-                                }`}
-                                style={{ width: `${capacity}%` }}
-                              />
-                            </div>
-                            <span className="text-sm font-bold text-gray-700">{capacity}%</span>
-                          </div>
+                  {/* Collapsible Line Capacity */}
+                  <div className="mb-6">
+                    {showLineCapacity ? (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-semibold text-gray-700">Line Capacity Overview</h3>
+                          <button
+                            onClick={() => setShowLineCapacity(false)}
+                            className="text-xs text-gray-600 hover:text-gray-800 flex items-center gap-1 px-3 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                          >
+                            <span>Hide Capacity</span>
+                            <X size={14} />
+                          </button>
                         </div>
-                      );
-                    })}
+                        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${productionLines.length}, minmax(0, 1fr))` }}>
+                          {productionLines.map(line => {
+                            const capacity = getLineCapacity(line.name);
+                            const lineOrders = orders.filter(o => o.linesAssigned.includes(line.name) && o.status === 'In Production');
+                            
+                            return (
+                              <div key={line.id} className="bg-gray-50 rounded-lg p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-gray-900">{line.name}</p>
+                                    <p className="text-xs text-gray-500">👥 {line.operators || 0} operators</p>
+                                  </div>
+                                  <span className="text-xs text-gray-600">{lineOrders.length} orders</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                    <div
+                                      className={`h-2 rounded-full transition-all ${
+                                        capacity >= 90 ? 'bg-red-500' :
+                                        capacity >= 70 ? 'bg-orange-500' :
+                                        'bg-green-500'
+                                      }`}
+                                      style={{ width: `${capacity}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-sm font-bold text-gray-700">{capacity}%</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setShowLineCapacity(true)}
+                        className="w-full bg-white border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 text-sm">
+                            {productionLines.map(line => {
+                              const capacity = getLineCapacity(line.name);
+                              return (
+                                <div key={line.id} className="flex items-center gap-2">
+                                  <span className="font-semibold text-gray-900">{line.name}:</span>
+                                  <div className="flex items-center gap-1">
+                                    <div className={`w-2 h-2 rounded-full ${
+                                      capacity >= 90 ? 'bg-red-500' :
+                                      capacity >= 70 ? 'bg-orange-500' :
+                                      'bg-green-500'
+                                    }`}></div>
+                                    <span className="font-bold text-gray-700">{capacity}%</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <span className="text-xs text-gray-500">Click to expand capacity</span>
+                        </div>
+                      </button>
+                    )}
                   </div>
 
                   <div className="overflow-x-auto">
                     <div className="inline-block min-w-full">
                       <table className="w-full border-collapse">
-                        <thead>
+                        <thead className="sticky top-0 z-20 bg-white shadow-sm">
                           <tr>
-                            <th className="sticky left-0 bg-white border border-gray-300 px-4 py-3 text-left font-semibold text-sm z-10 min-w-[100px]">
+                            <th className="sticky left-0 bg-white border border-gray-300 px-4 py-3 text-left font-semibold text-sm z-30 min-w-[100px]">
                               Line
                             </th>
                             {timelineDates.map(date => {
@@ -1008,7 +1305,7 @@ const App = () => {
                         <tbody>
                           {productionLines.map(line => (
                             <tr key={line.id}>
-                              <td className="sticky left-0 bg-white border border-gray-300 px-4 py-3 z-10">
+                              <td className="sticky left-0 bg-white border border-gray-300 px-4 py-3 z-10 shadow-sm">
                                 <div className="font-semibold text-sm text-gray-900">{line.name}</div>
                               </td>
                               {timelineDates.map(date => {
@@ -1019,7 +1316,6 @@ const App = () => {
                                 const productionStatus = order ? getProductionStatus(order, line.name, date) : null;
                                 const hourlyTarget = order ? getHourlyTarget(order) : null;
                                 
-                                // Get hourly emojis for the day
                                 const hourlyEmojis = [];
                                 if (order && isWorkingDay(date)) {
                                   for (let hour = 1; hour <= workingHours; hour++) {
@@ -1043,8 +1339,19 @@ const App = () => {
                                         <div
                                           className="h-full flex flex-col items-center justify-center text-xs text-white font-semibold cursor-pointer hover:opacity-90 transition-opacity p-1"
                                           style={{ backgroundColor: order.color }}
-                                          title={`${order.orderNumber} - Click for time-based tracking\nHourly Target: ${hourlyTarget || 'N/A'} pcs/hour\nWork Hours: ${getTimeLabel(1)} to ${getTimeLabel(workingHours).split('-')[1]}`}
+                                          title={`${order.orderNumber} - Click for time-based tracking\n${
+                                            order.lineSchedules?.[line.name] 
+                                              ? `${line.name}: ${order.lineSchedules[line.name].startDate} to ${order.lineSchedules[line.name].endDate}`
+                                              : `All lines: ${order.startDate} to ${order.endDate}`
+                                          }\nDaily Target: ${order.dailyTarget || 'N/A'} pcs/day\nHourly Target: ${hourlyTarget || 'N/A'} pcs/hour${targetStatus && targetStatus.dailyRequiredPerLine !== order.dailyTarget ? `\nCalculated Required: ${targetStatus.dailyRequiredPerLine} pcs/day` : ''}`}
                                         >
+                                          {/* Custom schedule indicator */}
+                                          {order.lineSchedules?.[line.name] && order.linesAssigned.length > 1 && (
+                                            <div className="absolute top-1 right-1">
+                                              <Calendar size={10} className="text-white opacity-70" />
+                                            </div>
+                                          )}
+                                          
                                           <span className="truncate w-full text-center text-[10px]">{order.orderNumber}</span>
                                           {productionStatus ? (
                                             <div className={`mt-1 px-2 py-1 rounded text-[9px] font-bold ${
@@ -1064,6 +1371,15 @@ const App = () => {
                                               {hourlyEmojis.map((emoji, idx) => (
                                                 <span key={idx} className="text-[10px]">{emoji}</span>
                                               ))}
+                                            </div>
+                                          )}
+                                          {/* Target indicator - same logic as scoreboard */}
+                                          {targetStatus && order.dailyTarget && (
+                                            <div className="mt-0.5 text-[8px] opacity-90">
+                                              Target: {order.dailyTarget}
+                                              {targetStatus.dailyRequiredPerLine !== order.dailyTarget && (
+                                                <span className="text-yellow-200"> (Need: {targetStatus.dailyRequiredPerLine})</span>
+                                              )}
                                             </div>
                                           )}
                                         </div>
@@ -1094,6 +1410,10 @@ const App = () => {
                       <span className="text-gray-600">Available</span>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Calendar size={16} className="text-indigo-600" />
+                      <span className="text-gray-600">Custom line schedule</span>
+                    </div>
+                    <div className="flex items-center gap-2">
                       <span className="text-base">🎉</span>
                       <span className="text-gray-600">100%+ hourly target</span>
                     </div>
@@ -1119,6 +1439,8 @@ const App = () => {
               <div className="space-y-3">
                 {completedOrders.map(order => {
                   const orderValue = (parseInt(order.quantity || 0) * parseFloat(order.unitPrice || 0));
+                  const trimsStatus = getTrimsStatus(order);
+                  
                   return (
                     <div key={order.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                       <div className="flex items-start justify-between">
@@ -1150,13 +1472,13 @@ const App = () => {
                                     {order.priority.toUpperCase()}
                                   </span>
                                 )}
-                                {order.complexity && (
+                                {trimsStatus.status !== 'none' && (
                                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                    order.complexity === 'hard' ? 'bg-purple-100 text-purple-700' :
-                                    order.complexity === 'medium' ? 'bg-blue-100 text-blue-700' :
-                                    'bg-green-100 text-green-700'
+                                    trimsStatus.status === 'complete' ? 'bg-green-100 text-green-700' :
+                                    trimsStatus.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
+                                    'bg-orange-100 text-orange-700'
                                   }`}>
-                                    {order.complexity.toUpperCase()}
+                                    {trimsStatus.message}
                                   </span>
                                 )}
                               </div>
@@ -1173,17 +1495,10 @@ const App = () => {
                                 </div>
                               )}
                               <div>
-                                <span className="text-gray-500">Lines:</span>
-                                <span className="ml-2 font-medium">{order.linesAssigned.join(', ')}</span>
-                              </div>
-                              <div>
                                 <span className="text-gray-500">Completed:</span>
                                 <span className="ml-2 font-medium">{order.completedDate}</span>
                               </div>
                             </div>
-                            {order.notes && (
-                              <p className="text-xs text-gray-600 italic mt-2">{order.notes}</p>
-                            )}
                           </div>
                         </div>
                         <div className="flex gap-2 ml-4">
@@ -1227,6 +1542,7 @@ const App = () => {
             {orders.map(order => {
               const targetStatus = checkTargetMet(order);
               const orderValue = (parseInt(order.quantity || 0) * parseFloat(order.unitPrice || 0));
+              const trimsStatus = getTrimsStatus(order);
 
               return (
                 <div key={order.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:border-gray-300 transition-colors">
@@ -1386,6 +1702,28 @@ const App = () => {
                           <div className="flex items-center justify-between mb-1">
                             <p className="font-bold text-gray-900 text-sm truncate">{order.orderNumber}</p>
                             <div className="flex gap-1 flex-shrink-0 ml-2">
+                              {order.linesAssigned.length > 1 && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedOrderForSchedule(order);
+                                    setShowLineSchedule(true);
+                                  }}
+                                  className="p-1 text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                  title="Manage Line Schedules"
+                                >
+                                  <Calendar size={14} />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  setSelectedOrderForTrims(order);
+                                  setShowTrimsManager(true);
+                                }}
+                                className="p-1 text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                title="Manage Trims"
+                              >
+                                <ClipboardList size={14} />
+                              </button>
                               <button
                                 onClick={() => handleCompleteOrder(order.id)}
                                 className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
@@ -1408,7 +1746,7 @@ const App = () => {
                             </div>
                           </div>
                           <p className="text-xs text-gray-600 font-medium truncate">{order.client}</p>
-                          <div className="flex gap-2 mt-1">
+                          <div className="flex gap-2 mt-1 flex-wrap">
                             {order.priority && (
                               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                                 order.priority === 'high' ? 'bg-red-100 text-red-700' :
@@ -1425,6 +1763,15 @@ const App = () => {
                                 'bg-green-100 text-green-700'
                               }`}>
                                 {order.complexity.toUpperCase()}
+                              </span>
+                            )}
+                            {trimsStatus.status !== 'none' && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                trimsStatus.status === 'complete' ? 'bg-green-100 text-green-700' :
+                                trimsStatus.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
+                                'bg-orange-100 text-orange-700'
+                              }`}>
+                                📋 {trimsStatus.message}
                               </span>
                             )}
                           </div>
@@ -1454,7 +1801,15 @@ const App = () => {
                         )}
                         <div className="flex justify-between">
                           <span className="text-gray-500">Lines:</span>
-                          <span className="font-medium text-gray-900">{order.linesAssigned.join(', ')}</span>
+                          <div className="text-right">
+                            <span className="font-medium text-gray-900">{order.linesAssigned.join(', ')}</span>
+                            {order.linesAssigned.length > 1 && order.lineSchedules && (
+                              <div className="text-[10px] text-indigo-600 mt-0.5">
+                                <Calendar size={10} className="inline mr-1" />
+                                Individual schedules
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-500">Working Days:</span>
@@ -1462,14 +1817,14 @@ const App = () => {
                         </div>
                         {targetStatus && targetStatus.numLines > 1 && (
                           <div className="flex justify-between">
-                            <span className="text-gray-500">Per Line Required:</span>
+                            <span className="text-gray-500">Calculated Required:</span>
                             <span className="font-medium text-gray-900">{targetStatus.dailyRequiredPerLine} pcs/day</span>
                           </div>
                         )}
                         {order.dailyTarget && (
                           <>
                             <div className="flex justify-between">
-                              <span className="text-gray-500">Target Per Line:</span>
+                              <span className="text-gray-500">Your Target:</span>
                               <span className="font-medium text-gray-900">{order.dailyTarget} pcs/day</span>
                             </div>
                             <div className="flex justify-between">
@@ -1485,6 +1840,21 @@ const App = () => {
                               </span>
                             </div>
                           </>
+                        )}
+                        {trimsStatus.shortage && trimsStatus.shortage.length > 0 && (
+                          <div className="pt-1 border-t border-gray-200">
+                            <span className="text-red-600 font-medium">⚠ Shortages:</span>
+                            {trimsStatus.shortage.slice(0, 2).map(trim => (
+                              <p key={trim.id} className="text-red-600 mt-0.5 text-[11px]">
+                                • {trim.name}: {trim.quantityReceived}/{trim.quantityRequired} {trim.unit}
+                              </p>
+                            ))}
+                            {trimsStatus.shortage.length > 2 && (
+                              <p className="text-red-600 mt-0.5 text-[11px]">
+                                +{trimsStatus.shortage.length - 2} more
+                              </p>
+                            )}
+                          </div>
                         )}
                         {order.notes && (
                           <div className="pt-1 border-t border-gray-200">
@@ -1510,10 +1880,361 @@ const App = () => {
         </div>
       </div>
 
-{/* Scoreboard View - Single Screen Table with Input */}
+      {/* Trims Manager Modal */}
+      {showTrimsManager && selectedOrderForTrims && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+            {(() => {
+              // Get fresh order data from orders array in real-time
+              const currentOrder = orders.find(o => o.id === selectedOrderForTrims.id);
+              if (!currentOrder) return null;
+              
+              return (
+                <>
+                  <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
+                    <div>
+                      <h2 className="text-xl font-semibold">Trims & Materials Checklist</h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {currentOrder.orderNumber} - {currentOrder.client}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowTrimsManager(false);
+                        setSelectedOrderForTrims(null);
+                      }}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X size={24} />
+                    </button>
+                  </div>
+
+                  <div className="p-6">
+                    {/* Existing Trims List */}
+                    {currentOrder.trims && currentOrder.trims.length > 0 && (
+                      <div className="mb-6">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Current Trims & Materials</h3>
+                        <div className="space-y-2">
+                          {currentOrder.trims.map(trim => {
+                            const received = trim.quantityReceived || 0;
+                            const required = trim.quantityRequired;
+                            const shortage = required - received;
+                            const percentage = (received / required) * 100;
+                            
+                            return (
+                              <div key={trim.id} className={`p-4 rounded-lg border-2 ${
+                                trim.status === 'complete' ? 'bg-green-50 border-green-200' :
+                                trim.status === 'partial' ? 'bg-yellow-50 border-yellow-200' :
+                                'bg-orange-50 border-orange-200'
+                              }`}>
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-3 mb-2">
+                                      <h4 className="font-semibold text-gray-900">{trim.name}</h4>
+                                      {trim.status === 'complete' ? (
+                                        <CheckCircle2 className="text-green-600" size={20} />
+                                      ) : trim.status === 'partial' ? (
+                                        <AlertCircle className="text-yellow-600" size={20} />
+                                      ) : (
+                                        <XCircle className="text-orange-600" size={20} />
+                                      )}
+                                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                                        trim.status === 'complete' ? 'bg-green-100 text-green-700' :
+                                        trim.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
+                                        'bg-orange-100 text-orange-700'
+                                      }`}>
+                                        {trim.status.toUpperCase()}
+                                      </span>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 gap-4 mb-3">
+                                      <div>
+                                        <label className="block text-xs text-gray-600 mb-1">Required Quantity</label>
+                                        <div className="text-sm font-semibold text-gray-900">
+                                          {required.toLocaleString()} {trim.unit}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs text-gray-600 mb-1">Received Quantity</label>
+                                        <input
+                                          type="number"
+                                          value={trim.quantityReceived}
+                                          onChange={(e) => handleUpdateTrim(trim.id, 'quantityReceived', e.target.value)}
+                                          className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-semibold"
+                                          placeholder="0"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    {shortage > 0 && (
+                                      <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded">
+                                        <p className="text-sm font-semibold text-red-700">
+                                          ⚠ Shortage: {shortage.toLocaleString()} {trim.unit} ({percentage.toFixed(1)}% received)
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {received > required && (
+                                      <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded">
+                                        <p className="text-sm font-semibold text-blue-700">
+                                          ✓ Surplus: {(received - required).toLocaleString()} {trim.unit} extra ({percentage.toFixed(1)}% received)
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 gap-4 text-xs text-gray-600">
+                                      {trim.supplier && (
+                                        <div>
+                                          <span className="font-medium">Supplier:</span> {trim.supplier}
+                                        </div>
+                                      )}
+                                      {trim.notes && (
+                                        <div className="col-span-2">
+                                          <span className="font-medium">Notes:</span> {trim.notes}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  
+                                  <button
+                                    onClick={() => handleDeleteTrim(trim.id)}
+                                    className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors flex-shrink-0"
+                                    title="Delete Trim"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Add New Trim */}
+                    <div className="border-t pt-6">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Add New Trim/Material</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Trim Name *</label>
+                          <input
+                            type="text"
+                            value={newTrimItem.name}
+                            onChange={(e) => setNewTrimItem({...newTrimItem, name: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="e.g., Buttons, Zippers, Thread"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Supplier</label>
+                          <input
+                            type="text"
+                            value={newTrimItem.supplier}
+                            onChange={(e) => setNewTrimItem({...newTrimItem, supplier: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="Supplier name"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Required Quantity *</label>
+                          <input
+                            type="number"
+                            value={newTrimItem.quantityRequired}
+                            onChange={(e) => setNewTrimItem({...newTrimItem, quantityRequired: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="e.g., 5000"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Received Quantity</label>
+                          <input
+                            type="number"
+                            value={newTrimItem.quantityReceived}
+                            onChange={(e) => setNewTrimItem({...newTrimItem, quantityReceived: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
+                          <select
+                            value={newTrimItem.unit}
+                            onChange={(e) => setNewTrimItem({...newTrimItem, unit: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="pcs">Pieces (pcs)</option>
+                            <option value="meters">Meters (m)</option>
+                            <option value="yards">Yards (yd)</option>
+                            <option value="kg">Kilograms (kg)</option>
+                            <option value="rolls">Rolls</option>
+                            <option value="boxes">Boxes</option>
+                            <option value="sets">Sets</option>
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                          <input
+                            type="text"
+                            value={newTrimItem.notes}
+                            onChange={(e) => setNewTrimItem({...newTrimItem, notes: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            placeholder="Additional notes"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleAddTrim}
+                        className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                      >
+                        <Plus size={20} />
+                        Add Trim/Material
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Line Schedule Manager Modal */}
+      {showLineSchedule && selectedOrderForSchedule && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            {(() => {
+              const currentOrder = orders.find(o => o.id === selectedOrderForSchedule.id);
+              if (!currentOrder) return null;
+              
+              return (
+                <>
+                  <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
+                    <div>
+                      <h2 className="text-xl font-semibold">Manage Line Schedules</h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {currentOrder.orderNumber} - {currentOrder.client}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Set independent start/end dates for each production line
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowLineSchedule(false);
+                        setSelectedOrderForSchedule(null);
+                      }}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X size={24} />
+                    </button>
+                  </div>
+
+                  <div className="p-6">
+                    <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-sm text-blue-900">
+                        <strong>💡 Tip:</strong> Adjust individual line dates to remove lines early when finishing up production. 
+                        This allows you to reassign lines to new orders while others complete the current order.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3">
+                      {currentOrder.linesAssigned.map(lineName => {
+                        const schedule = currentOrder.lineSchedules?.[lineName] || {
+                          startDate: currentOrder.startDate,
+                          endDate: currentOrder.endDate
+                        };
+                        
+                        return (
+                          <div key={lineName} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-1 h-12 rounded" style={{ backgroundColor: currentOrder.color }}></div>
+                                <h3 className="font-semibold text-gray-900">{lineName}</h3>
+                              </div>
+                              {currentOrder.linesAssigned.length > 1 && (
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Remove ${lineName} from this order? Production data for this line will be preserved.`)) {
+                                      handleRemoveLineFromOrder(currentOrder.id, lineName);
+                                      if (currentOrder.linesAssigned.length === 2) {
+                                        setShowLineSchedule(false);
+                                        setSelectedOrderForSchedule(null);
+                                      }
+                                    }
+                                  }}
+                                  className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                  title="Remove Line from Order"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Start Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={schedule.startDate}
+                                  onChange={(e) => handleUpdateLineSchedule(lineName, 'startDate', e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  End Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={schedule.endDate}
+                                  onChange={(e) => handleUpdateLineSchedule(lineName, 'endDate', e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                            </div>
+                            
+                            <div className="mt-2 text-xs text-gray-600">
+                              {(() => {
+                                const start = new Date(schedule.startDate);
+                                const end = new Date(schedule.endDate);
+                                const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+                                const workingDays = getWorkingDays(schedule.startDate, schedule.endDate);
+                                return (
+                                  <span>
+                                    Duration: {days} days ({workingDays} working days)
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-6 flex justify-end">
+                      <button
+                        onClick={() => {
+                          setShowLineSchedule(false);
+                          setSelectedOrderForSchedule(null);
+                        }}
+                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+{/* Scoreboard - Keep existing scoreboard code but ensure it uses order.dailyTarget consistently */}
 {showScoreboard && (
   <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col h-screen overflow-hidden">
-    {/* Compact Header */}
     <div className="flex-shrink-0 px-6 py-3 bg-slate-900 border-b border-slate-700 flex items-center justify-between">
       <div>
         <h1 className="text-2xl font-bold text-white">Production Scoreboard</h1>
@@ -1543,20 +2264,15 @@ const App = () => {
       </div>
     </div>
 
-    {/* Main Table - Fills remaining space */}
     <div className="flex-1 p-4 min-h-0 overflow-hidden">
       <div className="h-full flex flex-col">
-        {/* Production Lines Table */}
         <div className="flex-1 bg-slate-900 rounded-xl border border-slate-700 overflow-hidden flex flex-col">
-          {/* Table Header */}
           <div className="flex-shrink-0 bg-slate-800 border-b border-slate-700">
             <div className="flex items-stretch">
-              {/* Line Info Column */}
               <div className="w-64 border-r border-slate-700 p-3">
                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Production Line</h3>
               </div>
               
-              {/* Hourly Columns */}
               <div className="flex-1 flex">
                 {Array.from({ length: workingHours }, (_, i) => i + 1).map(hour => (
                   <div 
@@ -1570,7 +2286,6 @@ const App = () => {
                 ))}
               </div>
 
-              {/* Summary Columns */}
               <div className="w-80 border-l border-slate-700 flex">
                 <div className="flex-1 p-2 text-center border-r border-slate-700">
                   <div className="text-[10px] font-bold text-slate-400 uppercase">Target</div>
@@ -1588,7 +2303,6 @@ const App = () => {
             </div>
           </div>
 
-          {/* Table Body - Auto-sized rows */}
           <div className="flex-1 min-h-0">
             <div 
               className="grid h-full"
@@ -1617,8 +2331,8 @@ const App = () => {
                 const hourlyTarget = getHourlyTarget(order);
                 const targetStatus = checkTargetMet(order);
                 const dailyProduction = order.dailyProduction?.[`${line.name}-${today}`] || 0;
-                const dailyTarget = order.dailyTarget; // User-set target
-                const calculatedTarget = targetStatus?.dailyRequiredPerLine || 0; // Auto-calculated guide
+                const dailyTarget = order.dailyTarget;
+                const calculatedTarget = targetStatus?.dailyRequiredPerLine || 0;
 
                 let totalRejects = 0;
                 for (let h = 1; h <= workingHours; h++) {
@@ -1628,25 +2342,23 @@ const App = () => {
 
                 return (
                   <div key={line.id} className="flex items-stretch border-b border-slate-800 last:border-b-0 hover:bg-slate-800/30 transition-colors">
-                    {/* Line Info */}
-                      <div className="w-64 border-r border-slate-700 p-3 flex flex-col justify-center">
-                        <div className="flex items-center gap-2 mb-2">
-                          <h4 className="text-xl font-bold text-white">{line.name}</h4>
-                          <span className="px-2 py-0.5 bg-blue-600/20 border border-blue-500/50 rounded text-blue-300 text-xs font-bold">
-                            {order.orderNumber}
-                          </span>
-                        </div>
-                        <p className="text-xs text-cyan-400 font-bold">
-                          Target: {hourlyTarget || '-'}/hr
-                        </p>
-                        {calculatedTarget && calculatedTarget !== dailyTarget && (
-                          <p className="text-xs text-amber-400 mt-0.5">
-                            Guide: {calculatedTarget} pcs/day
-                          </p>
-                        )}
+                    <div className="w-64 border-r border-slate-700 p-3 flex flex-col justify-center">
+                      <div className="flex items-center gap-2 mb-2">
+                        <h4 className="text-xl font-bold text-white">{line.name}</h4>
+                        <span className="px-2 py-0.5 bg-blue-600/20 border border-blue-500/50 rounded text-blue-300 text-xs font-bold">
+                          {order.orderNumber}
+                        </span>
                       </div>
+                      <p className="text-xs text-cyan-400 font-bold">
+                        Target: {hourlyTarget || '-'}/hr
+                      </p>
+                      {calculatedTarget && calculatedTarget !== dailyTarget && (
+                        <p className="text-xs text-amber-400 mt-0.5">
+                          Guide: {calculatedTarget} pcs/day
+                        </p>
+                      )}
+                    </div>
                     
-                    {/* Hourly Production - CLICKABLE */}
                     <div className="flex-1 flex items-stretch">
                       {Array.from({ length: workingHours }, (_, i) => i + 1).map(hour => {
                         const hourStatus = getHourlyStatus(order, line.name, today, hour);
@@ -1696,7 +2408,6 @@ const App = () => {
                       })}
                     </div>
 
-                    {/* Summary Stats */}
                     <div className="w-80 border-l border-slate-700 flex items-stretch">
                       <div className="flex-1 border-r border-slate-700 flex flex-col items-center justify-center p-2">
                         <div className="text-2xl font-black text-cyan-400">{dailyTarget || '-'}</div>
@@ -1741,7 +2452,6 @@ const App = () => {
           </div>
         </div>
 
-        {/* Overall Summary - Compact at bottom */}
         <div className="flex-shrink-0 mt-3 bg-slate-900 rounded-xl border border-slate-700 p-4">
           <div className="flex items-center justify-between gap-6">
             <div className="text-center">
@@ -2052,7 +2762,7 @@ const App = () => {
                             <td className="border border-gray-300 px-4 py-2 text-center text-red-600">{totalRejects}</td>
                             <td className="border border-gray-300 px-4 py-2 text-center text-green-600">{totalProduction - totalRejects}</td>
                             <td className="border border-gray-300 px-4 py-2 text-center">
-                              {totalProduction >= (targetStatus?.dailyRequiredPerLine || 0) ? '✅' : '⚠️'}
+                              {totalProduction >= (order.dailyTarget || 0) ? '✅' : '⚠️'}
                             </td>
                           </tr>
                         </tbody>
@@ -2062,7 +2772,7 @@ const App = () => {
                     <div className="mt-4 grid grid-cols-3 gap-4">
                       <div className="bg-white p-3 rounded border">
                         <p className="text-xs text-gray-600">Daily Target</p>
-                        <p className="text-lg font-bold text-gray-900">{targetStatus?.dailyRequiredPerLine || 'N/A'} pcs</p>
+                        <p className="text-lg font-bold text-gray-900">{order.dailyTarget || 'N/A'} pcs</p>
                       </div>
                       <div className="bg-white p-3 rounded border">
                         <p className="text-xs text-gray-600">Reject Rate</p>
@@ -2073,7 +2783,7 @@ const App = () => {
                       <div className="bg-white p-3 rounded border">
                         <p className="text-xs text-gray-600">Efficiency</p>
                         <p className="text-lg font-bold text-blue-600">
-                          {targetStatus?.dailyRequiredPerLine > 0 ? ((totalProduction / targetStatus.dailyRequiredPerLine) * 100).toFixed(1) : 0}%
+                          {order.dailyTarget > 0 ? ((totalProduction / order.dailyTarget) * 100).toFixed(1) : 0}%
                         </p>
                       </div>
                     </div>
@@ -2085,7 +2795,7 @@ const App = () => {
         </div>
       )}
 
-      {/* Settings/Holidays Modal */}
+      {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-3xl w-full" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
@@ -2101,7 +2811,6 @@ const App = () => {
 
             <div className="overflow-y-auto" style={{ flex: 1 }}>
               <div className="p-6 space-y-6">
-                {/* Weekend Toggle */}
                 <div>
                   <label className="flex items-center gap-3 cursor-pointer">
                     <input
@@ -2117,7 +2826,6 @@ const App = () => {
                   </label>
                 </div>
 
-                {/* Data Storage Location */}
                 <div className="border-t pt-6">
                   <h3 className="text-sm font-semibold text-gray-700 mb-4">💾 Data Storage Location</h3>
                   <p className="text-xs text-gray-600 mb-3">
@@ -2142,12 +2850,11 @@ const App = () => {
                   </div>
                   <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                     <p className="text-xs text-yellow-800">
-                      <strong>💡 Network Folder Setup:</strong> To share data across multiple computers, select a folder on your network drive (e.g., \\server\production). All PCs must have access to this folder.
+                      <strong>💡 Network Folder Setup:</strong> To share data across multiple computers, select a folder on your network drive. All PCs must have access to this folder.
                     </p>
                   </div>
                 </div>
 
-                {/* Working Hours Configuration */}
                 <div className="border-t pt-6">
                   <h3 className="text-sm font-semibold text-gray-700 mb-4">⏰ Working Hours Configuration</h3>
                   <div className="grid grid-cols-2 gap-4">
@@ -2198,19 +2905,8 @@ const App = () => {
                       {workingHours} hours total ({workingHours > 8 ? 'Overtime' : workingHours < 8 ? 'Undertime' : 'Standard'})
                     </p>
                   </div>
-                  <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">💡 Common Schedule Examples:</p>
-                    <ul className="text-xs text-gray-600 space-y-1">
-                      <li>• Standard: 7am-3pm (8 hours)</li>
-                      <li>• Until 5pm: 7am-5pm (10 hours overtime)</li>
-                      <li>• Early Shift: 6am-2pm (8 hours)</li>
-                      <li>• Extended: 6am-5pm (11 hours overtime)</li>
-                      <li>• Full Day: 7am-6pm (11 hours overtime)</li>
-                    </ul>
-                  </div>
                 </div>
 
-                {/* Holidays */}
                 <div className="border-t pt-6">
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">Public Holidays</h3>
                   <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
@@ -2526,7 +3222,22 @@ const App = () => {
                   <input
                     type="date"
                     value={newOrder.startDate}
-                    onChange={(e) => setNewOrder({...newOrder, startDate: e.target.value})}
+                    onChange={(e) => {
+                      const newStartDate = e.target.value;
+                      // Update all line schedules with new start date
+                      const updatedLineSchedules = {};
+                      newOrder.linesAssigned.forEach(lineName => {
+                        updatedLineSchedules[lineName] = {
+                          startDate: newStartDate,
+                          endDate: newOrder.lineSchedules?.[lineName]?.endDate || newOrder.endDate
+                        };
+                      });
+                      setNewOrder({
+                        ...newOrder, 
+                        startDate: newStartDate,
+                        lineSchedules: updatedLineSchedules
+                      });
+                    }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
@@ -2538,7 +3249,22 @@ const App = () => {
                   <input
                     type="date"
                     value={newOrder.endDate}
-                    onChange={(e) => setNewOrder({...newOrder, endDate: e.target.value})}
+                    onChange={(e) => {
+                      const newEndDate = e.target.value;
+                      // Update all line schedules with new end date
+                      const updatedLineSchedules = {};
+                      newOrder.linesAssigned.forEach(lineName => {
+                        updatedLineSchedules[lineName] = {
+                          startDate: newOrder.lineSchedules?.[lineName]?.startDate || newOrder.startDate,
+                          endDate: newEndDate
+                        };
+                      });
+                      setNewOrder({
+                        ...newOrder, 
+                        endDate: newEndDate,
+                        lineSchedules: updatedLineSchedules
+                      });
+                    }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
