@@ -892,6 +892,35 @@ const App = () => {
     return { actual, status: 'below', target };
   };
 
+  const getTotalProducedForOrder = (order) => {
+    let total = 0;
+    Object.keys(order.dailyProduction || {}).forEach(key => {
+      total += order.dailyProduction[key] || 0;
+    });
+    return total;
+  };
+
+  const getProductionProgress = (order) => {
+    const totalProduced = getTotalProducedForOrder(order);
+    const targetQuantity = parseInt(order.quantity) || 0;
+    if (targetQuantity === 0) return 0;
+    return Math.min(100, Math.round((totalProduced / targetQuantity) * 100));
+  };
+
+  const getRemainingQuantity = (order) => {
+    const totalProduced = getTotalProducedForOrder(order);
+    const targetQuantity = parseInt(order.quantity) || 0;
+    return Math.max(0, targetQuantity - totalProduced);
+  };
+
+  const getDaysRemaining = (order) => {
+    const today = new Date();
+    const endDate = new Date(order.endDate);
+    const diffTime = endDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays);
+  };
+
   const totalOrders = orders.length;
   const activeOrders = orders.filter(o => o.status === 'In Production').length;
   const totalQuantity = orders.reduce((sum, order) => sum + parseInt(order.quantity || 0), 0);
@@ -902,7 +931,7 @@ const App = () => {
   }, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       {showSyncNotification && (
         <div className="fixed top-4 right-4 z-50 animate-fade-in">
           <div className="bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
@@ -933,7 +962,8 @@ const App = () => {
         </div>
       )}
 
-      <div className="bg-white shadow-sm border-b">
+      {/* Header - Fixed */}
+      <div className="bg-white shadow-sm border-b flex-shrink-0">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -988,8 +1018,10 @@ const App = () => {
         </div>
       </div>
 
-      <div className="h-[calc(100vh-80px)]">
-        <div className="h-full overflow-auto p-6">
+      {/* Main Content Area - Flex Container */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Side - Timeline/Calendar View */}
+        <div className="flex-1 overflow-auto p-6">
           <div className="flex gap-2 mb-6">
             <button
               onClick={() => setActiveTab('active')}
@@ -1532,17 +1564,24 @@ const App = () => {
           )}
         </div>
 
-        <div className="w-96 bg-white border-l shadow-lg overflow-auto">
-          <div className="sticky top-0 bg-white border-b p-4 z-10">
+        {/* Right Side - Active Orders Panel (FIXED LAYOUT) */}
+        <div className="w-96 bg-white border-l shadow-lg flex flex-col">
+          {/* Header - Fixed at top */}
+          <div className="flex-shrink-0 bg-white border-b p-4 z-10">
             <h2 className="text-lg font-semibold text-gray-900">Active Orders</h2>
             <p className="text-sm text-gray-600 mt-1">{orders.length} orders in production</p>
           </div>
 
-          <div className="p-4 space-y-3">
+          {/* Scrollable Content */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {orders.map(order => {
               const targetStatus = checkTargetMet(order);
               const orderValue = (parseInt(order.quantity || 0) * parseFloat(order.unitPrice || 0));
               const trimsStatus = getTrimsStatus(order);
+              const progress = getProductionProgress(order);
+              const totalProduced = getTotalProducedForOrder(order);
+              const remaining = getRemainingQuantity(order);
+              const daysLeft = getDaysRemaining(order);
 
               return (
                 <div key={order.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:border-gray-300 transition-colors">
@@ -1684,9 +1723,9 @@ const App = () => {
                     </div>
                   ) : (
                     <div>
-                      <div className="flex items-start gap-3 mb-2">
+                      <div className="flex items-start gap-3 mb-3">
                         <div 
-                          className="w-1 h-20 rounded flex-shrink-0" 
+                          className="w-1 h-24 rounded flex-shrink-0" 
                           style={{ backgroundColor: order.color }}
                         ></div>
                         
@@ -1694,7 +1733,7 @@ const App = () => {
                           <img 
                             src={order.image} 
                             alt={order.garmentType}
-                            className="w-16 h-16 object-cover rounded border border-gray-200"
+                            className="w-20 h-20 object-cover rounded border border-gray-200"
                           />
                         )}
                         
@@ -1777,6 +1816,36 @@ const App = () => {
                           </div>
                         </div>
                       </div>
+
+                      {/* Production Progress Bar */}
+                      <div className="mb-3 p-2 bg-white rounded border border-gray-200">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-semibold text-gray-700">Production Progress</span>
+                          <span className={`text-xs font-bold ${
+                            progress >= 100 ? 'text-green-600' :
+                            progress >= 75 ? 'text-blue-600' :
+                            progress >= 50 ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {progress}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2 mb-1">
+                          <div
+                            className={`h-2 rounded-full transition-all ${
+                              progress >= 100 ? 'bg-green-500' :
+                              progress >= 75 ? 'bg-blue-500' :
+                              progress >= 50 ? 'bg-yellow-500' :
+                              'bg-red-500'
+                            }`}
+                            style={{ width: `${Math.min(100, progress)}%` }}
+                          ></div>
+                        </div>
+                        <div className="flex justify-between text-[10px] text-gray-600">
+                          <span>{totalProduced.toLocaleString()} / {parseInt(order.quantity).toLocaleString()} pcs</span>
+                          <span>{remaining.toLocaleString()} remaining</span>
+                        </div>
+                      </div>
                       
                       <div className="space-y-1.5 text-xs">
                         <div className="flex justify-between">
@@ -1784,8 +1853,18 @@ const App = () => {
                           <span className="font-medium text-gray-900">{order.garmentType}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Quantity:</span>
+                          <span className="text-gray-500">Target:</span>
                           <span className="font-medium text-gray-900">{parseInt(order.quantity).toLocaleString()} pcs</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Produced:</span>
+                          <span className={`font-bold ${
+                            progress >= 100 ? 'text-green-600' :
+                            progress >= 75 ? 'text-blue-600' :
+                            'text-orange-600'
+                          }`}>
+                            {totalProduced.toLocaleString()} pcs
+                          </span>
                         </div>
                         {order.unitPrice && (
                           <>
@@ -1796,6 +1875,12 @@ const App = () => {
                             <div className="flex justify-between">
                               <span className="text-gray-500">Order Value:</span>
                               <span className="font-semibold text-emerald-600">E{orderValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Value Produced:</span>
+                              <span className="font-semibold text-emerald-600">
+                                E{(totalProduced * parseFloat(order.unitPrice)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                              </span>
                             </div>
                           </>
                         )}
@@ -1810,6 +1895,20 @@ const App = () => {
                               </div>
                             )}
                           </div>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Duration:</span>
+                          <span className="font-medium text-gray-900">{new Date(order.startDate).toLocaleDateString()} - {new Date(order.endDate).toLocaleDateString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Days Left:</span>
+                          <span className={`font-bold ${
+                            daysLeft === 0 ? 'text-red-600' :
+                            daysLeft <= 3 ? 'text-orange-600' :
+                            'text-green-600'
+                          }`}>
+                            {daysLeft} days
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-500">Working Days:</span>
