@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Calendar, Package, TrendingUp, X, Edit2, Save, Settings, Trash2, Target, Archive, CheckCircle, Clock, Upload, ClipboardList, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, Calendar, Package, TrendingUp, X, Edit2, Save, Settings, Trash2, Target, Archive, CheckCircle, Clock, Upload, ClipboardList, AlertCircle, CheckCircle2, XCircle, Scissors, Box, Printer, Download } from 'lucide-react';
 
 const App = () => {
   const isElectron = window.electronStore !== undefined;
@@ -42,7 +42,20 @@ const App = () => {
       dailyProduction: {},
       hourlyProduction: {},
       hourlyRejects: {},
-      trims: []
+      trims: [],
+      cuttingData: {
+        totalLayersRequired: 0,
+        layersCut: 0,
+        fabricUsed: 0,
+        fabricWastage: 0,
+        dailyCutting: {},
+        cuttingNotes: ''
+      },
+      packingData: {
+        totalPacked: 0,
+        boxes: [],
+        packingNotes: ''
+      }
     }
   ]);
 
@@ -70,6 +83,11 @@ const App = () => {
   const [showLineSchedule, setShowLineSchedule] = useState(false);
   const [selectedOrderForTrims, setSelectedOrderForTrims] = useState(null);
   const [selectedOrderForSchedule, setSelectedOrderForSchedule] = useState(null);
+  const [showCuttingDept, setShowCuttingDept] = useState(false);
+  const [showPackingDept, setShowPackingDept] = useState(false);
+  const [showPackingListGenerator, setShowPackingListGenerator] = useState(false);
+  const [selectedOrderForCutting, setSelectedOrderForCutting] = useState(null);
+  const [selectedOrderForPacking, setSelectedOrderForPacking] = useState(null);
   const [showStatsCards, setShowStatsCards] = useState(false);
   const [showLineCapacity, setShowLineCapacity] = useState(false);
   const [showOrdersPanel, setShowOrdersPanel] = useState(false);
@@ -95,6 +113,22 @@ const App = () => {
     const monday = new Date(today);
     monday.setDate(today.getDate() + diff);
     return monday.toISOString().split('T')[0];
+  });
+  const [cuttingDate, setCuttingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [cuttingInput, setCuttingInput] = useState({
+    layersCut: '',
+    fabricUsed: '',
+    fabricWastage: '',
+    notes: ''
+  });
+
+  // NEW: Packing Department States
+  const [packingBox, setPackingBox] = useState({
+    boxNo: '',
+    quantity: '',
+    sizes: '',
+    weight: '',
+    notes: ''
   });
 
   const [newTrimItem, setNewTrimItem] = useState({
@@ -126,7 +160,20 @@ const App = () => {
     dailyProduction: {},
     hourlyProduction: {},
     hourlyRejects: {},
-    trims: []
+    trims: [],
+    cuttingData: {
+      totalLayersRequired: 0,
+      layersCut: 0,
+      fabricUsed: 0,
+      fabricWastage: 0,
+      dailyCutting: {},
+      cuttingNotes: ''
+    },
+    packingData: {
+      totalPacked: 0,
+      boxes: [],
+      packingNotes: ''
+    }
   });
 
   React.useEffect(() => {
@@ -430,6 +477,211 @@ const App = () => {
     return { status: 'partial', message: `${complete}/${total} complete`, shortage };
   };
 
+
+
+  const handleAddCuttingData = () => {
+    if (!selectedOrderForCutting || !cuttingInput.layersCut) return;
+
+    const updatedOrders = orders.map(order => {
+      if (order.id === selectedOrderForCutting.id) {
+        const newCuttingData = {
+          ...order.cuttingData,
+          layersCut: (order.cuttingData.layersCut || 0) + parseInt(cuttingInput.layersCut || 0),
+          fabricUsed: (order.cuttingData.fabricUsed || 0) + parseFloat(cuttingInput.fabricUsed || 0),
+          fabricWastage: (order.cuttingData.fabricWastage || 0) + parseFloat(cuttingInput.fabricWastage || 0),
+          dailyCutting: {
+            ...order.cuttingData.dailyCutting,
+            [cuttingDate]: (order.cuttingData.dailyCutting?.[cuttingDate] || 0) + parseInt(cuttingInput.layersCut || 0)
+          },
+          cuttingNotes: cuttingInput.notes || order.cuttingData.cuttingNotes
+        };
+        return { ...order, cuttingData: newCuttingData };
+      }
+      return order;
+    });
+
+    setOrders(updatedOrders);
+    setCuttingInput({ layersCut: '', fabricUsed: '', fabricWastage: '', notes: '' });
+  };
+
+
+
+  const getCuttingProgress = (order) => {
+    if (!order.cuttingData.totalLayersRequired || order.cuttingData.totalLayersRequired === 0) {
+      return 0;
+    }
+    return Math.min(100, Math.round((order.cuttingData.layersCut / order.cuttingData.totalLayersRequired) * 100));
+  };
+
+  const getCuttingStatus = (order) => {
+    const progress = getCuttingProgress(order);
+    if (progress === 0) return { status: 'not-started', label: 'Not Started', color: 'gray' };
+    if (progress >= 100) return { status: 'complete', label: 'Complete', color: 'green' };
+    if (progress >= 75) return { status: 'on-track', label: 'On Track', color: 'blue' };
+    if (progress >= 50) return { status: 'in-progress', label: 'In Progress', color: 'yellow' };
+    return { status: 'behind', label: 'Behind Schedule', color: 'red' };
+  };
+
+  // NEW: Packing Department Functions
+  const handleAddPackingBox = () => {
+    if (!selectedOrderForPacking || !packingBox.boxNo || !packingBox.quantity) return;
+
+    const updatedOrders = orders.map(order => {
+      if (order.id === selectedOrderForPacking.id) {
+        const newBox = {
+          id: Date.now(),
+          boxNo: packingBox.boxNo,
+          quantity: parseInt(packingBox.quantity),
+          sizes: packingBox.sizes,
+          weight: parseFloat(packingBox.weight) || 0,
+          notes: packingBox.notes,
+          date: new Date().toISOString().split('T')[0]
+        };
+
+        const updatedBoxes = [...(order.packingData.boxes || []), newBox];
+        const totalPacked = updatedBoxes.reduce((sum, box) => sum + box.quantity, 0);
+
+        return {
+          ...order,
+          packingData: {
+            ...order.packingData,
+            boxes: updatedBoxes,
+            totalPacked
+          }
+        };
+      }
+      return order;
+    });
+
+    setOrders(updatedOrders);
+    setPackingBox({ boxNo: '', quantity: '', sizes: '', weight: '', notes: '' });
+  };
+
+
+  const handleDeleteBox = (boxId) => {
+    const updatedOrders = orders.map(order => {
+      if (order.id === selectedOrderForPacking.id) {
+        const updatedBoxes = order.packingData.boxes.filter(box => box.id !== boxId);
+        const totalPacked = updatedBoxes.reduce((sum, box) => sum + box.quantity, 0);
+        
+        return {
+          ...order,
+          packingData: {
+            ...order.packingData,
+            boxes: updatedBoxes,
+            totalPacked
+          }
+        };
+      }
+      return order;
+    });
+
+    setOrders(updatedOrders);
+  };
+
+  const getPackingProgress = (order) => {
+    const targetQty = parseInt(order.quantity) || 0;
+    if (targetQty === 0) return 0;
+    return Math.min(100, Math.round((order.packingData.totalPacked / targetQty) * 100));
+  };
+
+  const generatePackingList = (order) => {
+    const packingList = `
+═══════════════════════════════════════════════════════
+              SS MUDYF PRODUCTION TRACKER
+                    PACKING LIST
+═══════════════════════════════════════════════════════
+
+Order Number: ${order.orderNumber}
+Client: ${order.client}
+Garment Type: ${order.garmentType}
+Total Order Quantity: ${order.quantity} pcs
+Total Packed: ${order.packingData.totalPacked} pcs
+Remaining: ${parseInt(order.quantity) - order.packingData.totalPacked} pcs
+Date Generated: ${new Date().toLocaleString()}
+
+───────────────────────────────────────────────────────
+                    BOX DETAILS
+───────────────────────────────────────────────────────
+
+${order.packingData.boxes.map((box, idx) => `
+Box #${box.boxNo}
+  Quantity: ${box.quantity} pcs
+  Sizes: ${box.sizes || 'N/A'}
+  Weight: ${box.weight || 'N/A'} kg
+  Packed Date: ${box.date}
+  Notes: ${box.notes || 'None'}
+${idx < order.packingData.boxes.length - 1 ? '───────────────────────────────────────────────────────' : ''}
+`).join('')}
+
+═══════════════════════════════════════════════════════
+Total Boxes: ${order.packingData.boxes.length}
+Total Weight: ${order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(2)} kg
+═══════════════════════════════════════════════════════
+
+Notes: ${order.packingData.packingNotes || 'None'}
+
+Prepared By: _______________________  Date: ___________
+Checked By: ________________________  Date: ___________
+Approved By: _______________________  Date: ___________
+
+═══════════════════════════════════════════════════════
+    `.trim();
+
+    return packingList;
+  };
+
+  const printPackingList = (order) => {
+    const packingList = generatePackingList(order);
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Packing List - ${order.orderNumber}</title>
+          <style>
+            body {
+              font-family: 'Courier New', monospace;
+              margin: 20px;
+              white-space: pre-wrap;
+              font-size: 12px;
+              line-height: 1.4;
+            }
+            @media print {
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>${packingList}</body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  const exportPackingListCSV = (order) => {
+  let csvContent = "SS Mudyf Packing List\n";
+  csvContent += `Order: ${order.orderNumber},Client: ${order.client}\n`;
+  csvContent += `Garment Type: ${order.garmentType},Total Quantity: ${order.quantity}\n`;
+  csvContent += `Total Packed: ${order.packingData.totalPacked},Remaining: ${parseInt(order.quantity) - order.packingData.totalPacked}\n\n`;
+  csvContent += "Box No,Quantity,Sizes,Weight (kg),Date,Notes\n";
+  
+  order.packingData.boxes.forEach(box => {
+    // 👇 FIXED LINE - removed the quote error
+    csvContent += `${box.boxNo},${box.quantity},${box.sizes || 'N/A'},${box.weight || 0},${box.date},"${box.notes || ''}"\n`;
+  });
+
+  csvContent += `\nTotal Boxes: ${order.packingData.boxes.length}\n`;
+  csvContent += `Total Weight: ${order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(2)} kg\n`;
+
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Packing_List_${order.orderNumber}_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  window.URL.revokeObjectURL(url);
+};
+  
   const handleAddOrder = () => {
     if (newOrder.orderNumber && newOrder.client && newOrder.startDate && newOrder.endDate && newOrder.linesAssigned.length > 0) {
       // Initialize line schedules if not already set
@@ -450,7 +702,20 @@ const App = () => {
         hourlyProduction: {}, 
         hourlyRejects: {},
         trims: [],
-        lineSchedules
+        lineSchedules,
+                cuttingData: {
+          totalLayersRequired: 0,
+          layersCut: 0,
+          fabricUsed: 0,
+          fabricWastage: 0,
+          dailyCutting: {},
+          cuttingNotes: ''
+        },
+        packingData: {
+          totalPacked: 0,
+          boxes: [],
+          packingNotes: ''
+        }
       }]);
       setNewOrder({
         orderNumber: '',
@@ -472,7 +737,20 @@ const App = () => {
         dailyProduction: {},
         hourlyProduction: {},
         hourlyRejects: {},
-        trims: []
+        trims: [],
+                cuttingData: {
+          totalLayersRequired: 0,
+          layersCut: 0,
+          fabricUsed: 0,
+          fabricWastage: 0,
+          dailyCutting: {},
+          cuttingNotes: ''
+        },
+        packingData: {
+          totalPacked: 0,
+          boxes: [],
+          packingNotes: ''
+        }
       });
       setShowOrderForm(false);
     }
@@ -968,9 +1246,24 @@ const App = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">SS Mudyf Production Tracker</h1>
-              <p className="text-sm text-gray-600 mt-1">Real-time production tracking with trims management</p>
+              <p className="text-sm text-gray-600 mt-1">Complete production management from cutting to packing</p>
             </div>
             <div className="flex gap-2">
+              <button
+                onClick={() => setShowCuttingDept(true)}
+                className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                <Scissors size={20} />
+                Cutting
+              </button>
+              
+              <button
+                onClick={() => setShowPackingDept(true)}
+                className="flex items-center gap-2 bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 transition-colors"
+              >
+                <Box size={20} />
+                Packing
+              </button>
               <button
                 onClick={() => setShowDailyReport(true)}
                 className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
@@ -3433,6 +3726,455 @@ const App = () => {
                 >
                   Cancel
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+    {/* NEW: Cutting Department Modal */}
+      {showCuttingDept && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
+              <div>
+                <h2 className="text-2xl font-semibold flex items-center gap-2">
+                  <Scissors className="text-amber-600" size={28} />
+                  Cutting Department
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">Track fabric cutting progress for all orders</p>
+              </div>
+              <button
+                onClick={() => setShowCuttingDept(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="grid gap-6">
+                {orders.map(order => {
+                  const cuttingStatus = getCuttingStatus(order);
+                  const cuttingProgress = getCuttingProgress(order);
+                  
+                  return (
+                    <div key={order.id} className="bg-gray-50 rounded-lg border-2 border-gray-200 overflow-hidden">
+                      <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">{order.orderNumber}</h3>
+                            <p className="text-sm text-gray-600">{order.client} - {order.garmentType}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+                              cuttingStatus.color === 'green' ? 'bg-green-100 text-green-700' :
+                              cuttingStatus.color === 'blue' ? 'bg-blue-100 text-blue-700' :
+                              cuttingStatus.color === 'yellow' ? 'bg-yellow-100 text-yellow-700' :
+                              cuttingStatus.color === 'red' ? 'bg-red-100 text-red-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {cuttingStatus.label}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold text-gray-700">Cutting Progress</span>
+                            <span className="text-xs font-bold text-amber-700">{cuttingProgress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                              className={`h-3 rounded-full transition-all ${
+                                cuttingProgress >= 100 ? 'bg-green-500' :
+                                cuttingProgress >= 75 ? 'bg-blue-500' :
+                                cuttingProgress >= 50 ? 'bg-yellow-500' :
+                                'bg-red-500'
+                              }`}
+                              style={{ width: `${Math.min(100, cuttingProgress)}%` }}
+                            ></div>
+                          </div>
+                          <div className="flex justify-between text-xs text-gray-600 mt-1">
+                            <span>{order.cuttingData.layersCut} / {order.cuttingData.totalLayersRequired || 0} layers</span>
+                            <span>{order.cuttingData.totalLayersRequired - order.cuttingData.layersCut} remaining</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4">
+                        <div className="grid grid-cols-4 gap-4 mb-4">
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Total Layers Required</p>
+                            <p className="text-2xl font-bold text-gray-900">{order.cuttingData.totalLayersRequired || 0}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Layers Cut</p>
+                            <p className="text-2xl font-bold text-green-600">{order.cuttingData.layersCut || 0}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Fabric Used (m)</p>
+                            <p className="text-2xl font-bold text-blue-600">{order.cuttingData.fabricUsed?.toFixed(2) || 0}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Wastage (m)</p>
+                            <p className="text-2xl font-bold text-red-600">{order.cuttingData.fabricWastage?.toFixed(2) || 0}</p>
+                          </div>
+                        </div>
+
+                        <div className="bg-amber-50 rounded-lg p-4 border-2 border-amber-200">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Record Cutting Activity</h4>
+                          <div className="grid grid-cols-5 gap-3">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Date</label>
+                              <input
+                                type="date"
+                                value={cuttingDate}
+                                onChange={(e) => setCuttingDate(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Total Layers Required</label>
+                              <input
+                                type="number"
+                                value={order.cuttingData.totalLayersRequired}
+                                onChange={(e) => {
+                                  const updatedOrders = orders.map(o => 
+                                    o.id === order.id 
+                                      ? { ...o, cuttingData: { ...o.cuttingData, totalLayersRequired: parseInt(e.target.value) || 0 }}
+                                      : o
+                                  );
+                                  setOrders(updatedOrders);
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., 500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Layers Cut Today</label>
+                              <input
+                                type="number"
+                                value={cuttingInput.layersCut}
+                                onChange={(e) => setCuttingInput({...cuttingInput, layersCut: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., 50"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Fabric Used (m)</label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={cuttingInput.fabricUsed}
+                                onChange={(e) => setCuttingInput({...cuttingInput, fabricUsed: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., 125.5"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Wastage (m)</label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={cuttingInput.fabricWastage}
+                                onChange={(e) => setCuttingInput({...cuttingInput, fabricWastage: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., 5.2"
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                            <input
+                              type="text"
+                              value={cuttingInput.notes}
+                              onChange={(e) => setCuttingInput({...cuttingInput, notes: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              placeholder="Any issues or notes..."
+                            />
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedOrderForCutting(order);
+                              handleAddCuttingData();
+                            }}
+                            className="w-full mt-3 flex items-center justify-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors font-medium"
+                          >
+                            <Plus size={18} />
+                            Record Cutting Data
+                          </button>
+                        </div>
+
+                        {order.cuttingData.dailyCutting && Object.keys(order.cuttingData.dailyCutting).length > 0 && (
+                          <div className="mt-4">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Daily Cutting History</h4>
+                            <div className="bg-white rounded-lg border overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Date</th>
+                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Layers Cut</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {Object.entries(order.cuttingData.dailyCutting).sort((a, b) => b[0].localeCompare(a[0])).map(([date, layers]) => (
+                                    <tr key={date} className="border-t">
+                                      <td className="px-4 py-2">{new Date(date).toLocaleDateString()}</td>
+                                      <td className="px-4 py-2 text-right font-semibold">{layers}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {orders.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    <Scissors className="mx-auto mb-3 text-gray-300" size={48} />
+                    <p>No active orders</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: Packing Department Modal */}
+      {showPackingDept && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
+              <div>
+                <h2 className="text-2xl font-semibold flex items-center gap-2">
+                  <Box className="text-teal-600" size={28} />
+                  Packing Department
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">Track packing progress and generate packing lists</p>
+              </div>
+              <button
+                onClick={() => setShowPackingDept(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="grid gap-6">
+                {orders.map(order => {
+                  const packingProgress = getPackingProgress(order);
+                  const totalProduced = getTotalProducedForOrder(order);
+                  const remaining = parseInt(order.quantity) - order.packingData.totalPacked;
+                  
+                  return (
+                    <div key={order.id} className="bg-gray-50 rounded-lg border-2 border-gray-200 overflow-hidden">
+                      <div className="p-4 bg-gradient-to-r from-teal-50 to-cyan-50 border-b border-teal-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">{order.orderNumber}</h3>
+                            <p className="text-sm text-gray-600">{order.client} - {order.garmentType}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => printPackingList(order)}
+                              className="flex items-center gap-1 bg-white border-2 border-teal-600 text-teal-600 px-3 py-1.5 rounded-lg hover:bg-teal-50 transition-colors text-sm font-semibold"
+                            >
+                              <Printer size={16} />
+                              Print List
+                            </button>
+                            <button
+                              onClick={() => exportPackingListCSV(order)}
+                              className="flex items-center gap-1 bg-teal-600 text-white px-3 py-1.5 rounded-lg hover:bg-teal-700 transition-colors text-sm font-semibold"
+                            >
+                              <Download size={16} />
+                              Export CSV
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold text-gray-700">Packing Progress</span>
+                            <span className="text-xs font-bold text-teal-700">{packingProgress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                              className={`h-3 rounded-full transition-all ${
+                                packingProgress >= 100 ? 'bg-green-500' :
+                                packingProgress >= 75 ? 'bg-teal-500' :
+                                packingProgress >= 50 ? 'bg-blue-500' :
+                                'bg-yellow-500'
+                              }`}
+                              style={{ width: `${Math.min(100, packingProgress)}%` }}
+                            ></div>
+                          </div>
+                          <div className="flex justify-between text-xs text-gray-600 mt-1">
+                            <span>{order.packingData.totalPacked} / {order.quantity} pcs packed</span>
+                            <span>{remaining} remaining</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4">
+                        <div className="grid grid-cols-5 gap-4 mb-4">
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Total Quantity</p>
+                            <p className="text-2xl font-bold text-gray-900">{order.quantity}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Produced</p>
+                            <p className="text-2xl font-bold text-blue-600">{totalProduced}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Packed</p>
+                            <p className="text-2xl font-bold text-green-600">{order.packingData.totalPacked}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Total Boxes</p>
+                            <p className="text-2xl font-bold text-purple-600">{order.packingData.boxes.length}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Total Weight</p>
+                            <p className="text-2xl font-bold text-orange-600">
+                              {order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(1)} kg
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="bg-teal-50 rounded-lg p-4 border-2 border-teal-200 mb-4">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Add New Box</h4>
+                          <div className="grid grid-cols-5 gap-3">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Box Number *</label>
+                              <input
+                                type="text"
+                                value={packingBox.boxNo}
+                                onChange={(e) => setPackingBox({...packingBox, boxNo: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., 001"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Quantity *</label>
+                              <input
+                                type="number"
+                                value={packingBox.quantity}
+                                onChange={(e) => setPackingBox({...packingBox, quantity: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., 100"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Sizes</label>
+                              <input
+                                type="text"
+                                value={packingBox.sizes}
+                                onChange={(e) => setPackingBox({...packingBox, sizes: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., S/M/L"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Weight (kg)</label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={packingBox.weight}
+                                onChange={(e) => setPackingBox({...packingBox, weight: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="e.g., 15.5"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                              <input
+                                type="text"
+                                value={packingBox.notes}
+                                onChange={(e) => setPackingBox({...packingBox, notes: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                placeholder="Optional"
+                              />
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedOrderForPacking(order);
+                              handleAddPackingBox();
+                            }}
+                            className="w-full mt-3 flex items-center justify-center gap-2 bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 transition-colors font-medium"
+                          >
+                            <Plus size={18} />
+                            Add Box
+                          </button>
+                        </div>
+
+                        {order.packingData.boxes.length > 0 ? (
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Packed Boxes</h4>
+                            <div className="bg-white rounded-lg border overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Box No</th>
+                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Quantity</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Sizes</th>
+                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Weight</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Date</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Notes</th>
+                                    <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {order.packingData.boxes.sort((a, b) => b.date.localeCompare(a.date)).map((box) => (
+                                    <tr key={box.id} className="border-t hover:bg-gray-50">
+                                      <td className="px-4 py-2 font-semibold">{box.boxNo}</td>
+                                      <td className="px-4 py-2 text-right font-semibold">{box.quantity} pcs</td>
+                                      <td className="px-4 py-2">{box.sizes || 'N/A'}</td>
+                                      <td className="px-4 py-2 text-right">{box.weight || 0} kg</td>
+                                      <td className="px-4 py-2">{new Date(box.date).toLocaleDateString()}</td>
+                                      <td className="px-4 py-2 text-xs text-gray-600">{box.notes || '-'}</td>
+                                      <td className="px-4 py-2 text-center">
+                                        <button
+                                          onClick={() => {
+                                            setSelectedOrderForPacking(order);
+                                            handleDeleteBox(box.id);
+                                          }}
+                                          className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                          title="Delete Box"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center py-8 text-gray-400 bg-white rounded-lg border">
+                            <Box size={32} className="mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No boxes added yet</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {orders.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    <Box className="mx-auto mb-3 text-gray-300" size={48} />
+                    <p>No active orders</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
