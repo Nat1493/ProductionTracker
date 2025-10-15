@@ -116,10 +116,19 @@ const App = () => {
   });
   const [cuttingDate, setCuttingDate] = useState(new Date().toISOString().split('T')[0]);
   const [cuttingInput, setCuttingInput] = useState({
+    selectedMarker: '',
     layersCut: '',
-    fabricUsed: '',
     fabricWastage: '',
+    calculatedPieces: 0,
+    calculatedFabric: 0,
     notes: ''
+  });
+
+  const [newMarker, setNewMarker] = useState({
+    markerName: '',
+    piecesPerLay: '',
+    sizeRatio: '',
+    fabricPerLay: ''
   });
 
   // NEW: Packing Department States
@@ -164,9 +173,11 @@ const App = () => {
     cuttingData: {
       totalLayersRequired: 0,
       layersCut: 0,
+      piecesCut: 0,
       fabricUsed: 0,
       fabricWastage: 0,
       dailyCutting: {},
+      markers: [], // Array of marker objects
       cuttingNotes: ''
     },
     packingData: {
@@ -480,18 +491,39 @@ const App = () => {
 
 
   const handleAddCuttingData = () => {
-    if (!selectedOrderForCutting || !cuttingInput.layersCut) return;
+    if (!selectedOrderForCutting || !cuttingInput.layersCut || cuttingInput.selectedMarker === '') return;
+
+    const layersCut = parseInt(cuttingInput.layersCut || 0);
+    const markerIdx = parseInt(cuttingInput.selectedMarker);
+    const marker = selectedOrderForCutting.cuttingData.markers[markerIdx];
+    
+    if (!marker) {
+      alert('Please select a valid marker!');
+      return;
+    }
+
+    const piecesCut = layersCut * marker.piecesPerLay;
+    const fabricUsed = layersCut * marker.fabricPerLay;
+    const fabricWastage = parseFloat(cuttingInput.fabricWastage || 0);
 
     const updatedOrders = orders.map(order => {
       if (order.id === selectedOrderForCutting.id) {
         const newCuttingData = {
           ...order.cuttingData,
-          layersCut: (order.cuttingData.layersCut || 0) + parseInt(cuttingInput.layersCut || 0),
-          fabricUsed: (order.cuttingData.fabricUsed || 0) + parseFloat(cuttingInput.fabricUsed || 0),
-          fabricWastage: (order.cuttingData.fabricWastage || 0) + parseFloat(cuttingInput.fabricWastage || 0),
+          layersCut: (order.cuttingData.layersCut || 0) + layersCut,
+          piecesCut: (order.cuttingData.piecesCut || 0) + piecesCut,
+          fabricUsed: (order.cuttingData.fabricUsed || 0) + fabricUsed,
+          fabricWastage: (order.cuttingData.fabricWastage || 0) + fabricWastage,
           dailyCutting: {
             ...order.cuttingData.dailyCutting,
-            [cuttingDate]: (order.cuttingData.dailyCutting?.[cuttingDate] || 0) + parseInt(cuttingInput.layersCut || 0)
+            [cuttingDate]: {
+              layers: (order.cuttingData.dailyCutting?.[cuttingDate]?.layers || 0) + layersCut,
+              pieces: (order.cuttingData.dailyCutting?.[cuttingDate]?.pieces || 0) + piecesCut,
+              fabric: (order.cuttingData.dailyCutting?.[cuttingDate]?.fabric || 0) + fabricUsed,
+              waste: (order.cuttingData.dailyCutting?.[cuttingDate]?.waste || 0) + fabricWastage,
+              sizeRatio: marker.sizeRatio,
+              markerName: marker.markerName
+            }
           },
           cuttingNotes: cuttingInput.notes || order.cuttingData.cuttingNotes
         };
@@ -501,7 +533,14 @@ const App = () => {
     });
 
     setOrders(updatedOrders);
-    setCuttingInput({ layersCut: '', fabricUsed: '', fabricWastage: '', notes: '' });
+    setCuttingInput({ 
+      selectedMarker: cuttingInput.selectedMarker,
+      layersCut: '', 
+      fabricWastage: '', 
+      calculatedPieces: 0,
+      calculatedFabric: 0,
+      notes: '' 
+    });
   };
 
 
@@ -587,45 +626,53 @@ const App = () => {
 
   const generatePackingList = (order) => {
     const packingList = `
-═══════════════════════════════════════════════════════
-              SS MUDYF PRODUCTION TRACKER
-                    PACKING LIST
-═══════════════════════════════════════════════════════
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                      SS MUDYF PRODUCTION TRACKER                            │
+  │                            PACKING LIST                                     │
+  └─────────────────────────────────────────────────────────────────────────────┘
 
-Order Number: ${order.orderNumber}
-Client: ${order.client}
-Garment Type: ${order.garmentType}
-Total Order Quantity: ${order.quantity} pcs
-Total Packed: ${order.packingData.totalPacked} pcs
-Remaining: ${parseInt(order.quantity) - order.packingData.totalPacked} pcs
-Date Generated: ${new Date().toLocaleString()}
+  Order Information:
+  ├─ Order Number: ${order.orderNumber}
+  ├─ Client: ${order.client}
+  ├─ Garment Type: ${order.garmentType}
+  ├─ Total Order Quantity: ${order.quantity} pcs
+  ├─ Total Packed: ${order.packingData.totalPacked} pcs
+  ├─ Remaining: ${parseInt(order.quantity) - order.packingData.totalPacked} pcs
+  └─ Date Generated: ${new Date().toLocaleString()}
 
-───────────────────────────────────────────────────────
-                    BOX DETAILS
-───────────────────────────────────────────────────────
+  ┌───────┬──────────┬───────────────┬───────────┬──────────────┬──────────────┐
+  │ Box # │ Quantity │     Sizes     │ Weight(kg)│  Pack Date   │    Notes     │
+  ├───────┼──────────┼───────────────┼───────────┼──────────────┼──────────────┤
+  ${order.packingData.boxes.map((box) => {
+    const boxNo = String(box.boxNo).padEnd(5);
+    const qty = String(box.quantity).padEnd(8);
+    const sizes = String(box.sizes || 'N/A').substring(0, 13).padEnd(13);
+    const weight = String(box.weight || 'N/A').substring(0, 9).padEnd(9);
+    const date = String(new Date(box.date).toLocaleDateString()).padEnd(12);
+    const notes = String(box.notes || '-').substring(0, 12).padEnd(12);
+    return `│ ${boxNo} │ ${qty} │ ${sizes} │ ${weight} │ ${date} │ ${notes} │`;
+  }).join('\n')}
+  └───────┴──────────┴───────────────┴───────────┴──────────────┴──────────────┘
 
-${order.packingData.boxes.map((box, idx) => `
-Box #${box.boxNo}
-  Quantity: ${box.quantity} pcs
-  Sizes: ${box.sizes || 'N/A'}
-  Weight: ${box.weight || 'N/A'} kg
-  Packed Date: ${box.date}
-  Notes: ${box.notes || 'None'}
-${idx < order.packingData.boxes.length - 1 ? '───────────────────────────────────────────────────────' : ''}
-`).join('')}
+  Summary:
+  ├─ Total Boxes: ${order.packingData.boxes.length}
+  ├─ Total Quantity Packed: ${order.packingData.totalPacked} pcs
+  └─ Total Weight: ${order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(2)} kg
 
-═══════════════════════════════════════════════════════
-Total Boxes: ${order.packingData.boxes.length}
-Total Weight: ${order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(2)} kg
-═══════════════════════════════════════════════════════
+  Additional Notes:
+  ${order.packingData.packingNotes || 'None'}
 
-Notes: ${order.packingData.packingNotes || 'None'}
-
-Prepared By: _______________________  Date: ___________
-Checked By: ________________________  Date: ___________
-Approved By: _______________________  Date: ___________
-
-═══════════════════════════════════════════════════════
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                              SIGNATURES                                     │
+  ├─────────────────────────────────────────────────────────────────────────────┤
+  │                                                                             │
+  │ Prepared By: _______________________  Date: ___________                    │
+  │                                                                             │
+  │ Checked By:  _______________________  Date: ___________                    │
+  │                                                                             │
+  │ Approved By: _______________________  Date: ___________                    │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
     `.trim();
 
     return packingList;
@@ -640,14 +687,21 @@ Approved By: _______________________  Date: ___________
           <title>Packing List - ${order.orderNumber}</title>
           <style>
             body {
-              font-family: 'Courier New', monospace;
+              font-family: 'Courier New', 'Consolas', monospace;
               margin: 20px;
-              white-space: pre-wrap;
-              font-size: 12px;
-              line-height: 1.4;
+              white-space: pre;
+              font-size: 11px;
+              line-height: 1.3;
+              color: #000;
             }
             @media print {
-              body { margin: 0; }
+              body { 
+                margin: 10mm; 
+              }
+              @page {
+                size: A4;
+                margin: 10mm;
+              }
             }
           </style>
         </head>
@@ -671,7 +725,7 @@ Approved By: _______________________  Date: ___________
   });
 
   csvContent += `\nTotal Boxes: ${order.packingData.boxes.length}\n`;
-  csvContent += `Total Weight: ${order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(2)} kg\n`;
+  csvContent += `Total Weight : ${order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(2)} kg\n`;
 
   const blob = new Blob([csvContent], { type: 'text/csv' });
   const url = window.URL.createObjectURL(blob);
@@ -2140,15 +2194,53 @@ Approved By: _______________________  Date: ___________
                         </div>
                       </div>
                       
-                      <div className="space-y-1.5 text-xs">
+                        <div className="space-y-1.5 text-xs">
                         <div className="flex justify-between">
                           <span className="text-gray-500">Type:</span>
                           <span className="font-medium text-gray-900">{order.garmentType}</span>
                         </div>
+                        
+                        {/* Target Section */}
                         <div className="flex justify-between">
                           <span className="text-gray-500">Target:</span>
                           <span className="font-medium text-gray-900">{parseInt(order.quantity).toLocaleString()} pcs</span>
                         </div>
+                        
+                        {/* Cutting Summary (below Target) */}
+                        <div className="pl-4 border-l-2 border-amber-300 bg-amber-50 py-1 px-2 rounded-r">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 flex items-center gap-1">
+                              <Scissors size={12} className="text-amber-600" />
+                              Cutting:
+                            </span>
+                            <span className={`font-semibold ${
+                              getCuttingProgress(order) >= 100 ? 'text-green-600' :
+                              getCuttingProgress(order) >= 75 ? 'text-blue-600' :
+                              getCuttingProgress(order) >= 50 ? 'text-yellow-600' :
+                              'text-orange-600'
+                            }`}>
+                              {order.cuttingData.layersCut}/{order.cuttingData.totalLayersRequired || 0} layers ({getCuttingProgress(order)}%)
+                            </span>
+                          </div>
+                          {order.cuttingData.piecesCut > 0 && (
+                            <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                              <span className="font-semibold text-purple-600">{order.cuttingData.piecesCut.toLocaleString()} pieces cut</span>
+                            </div>
+                          )}
+                          {order.cuttingData.markers && order.cuttingData.markers.length > 0 && (
+                            <div className="mt-0.5 text-[10px] text-gray-600">
+                              <span>{order.cuttingData.markers.length} marker{order.cuttingData.markers.length > 1 ? 's' : ''} configured</span>
+                            </div>
+                          )}
+                          {order.cuttingData.fabricUsed > 0 && (
+                            <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                              <span>Fabric: {order.cuttingData.fabricUsed?.toFixed(1)}m</span>
+                              <span>Waste: {order.cuttingData.fabricWastage?.toFixed(1)}m</span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Produced Section */}
                         <div className="flex justify-between">
                           <span className="text-gray-500">Produced:</span>
                           <span className={`font-bold ${
@@ -2159,6 +2251,31 @@ Approved By: _______________________  Date: ___________
                             {totalProduced.toLocaleString()} pcs
                           </span>
                         </div>
+                        
+                        {/* Packing Summary (below Produced) */}
+                        <div className="pl-4 border-l-2 border-teal-300 bg-teal-50 py-1 px-2 rounded-r">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 flex items-center gap-1">
+                              <Box size={12} className="text-teal-600" />
+                              Packed:
+                            </span>
+                            <span className={`font-semibold ${
+                              getPackingProgress(order) >= 100 ? 'text-green-600' :
+                              getPackingProgress(order) >= 75 ? 'text-teal-600' :
+                              getPackingProgress(order) >= 50 ? 'text-blue-600' :
+                              'text-yellow-600'
+                            }`}>
+                              {order.packingData.totalPacked.toLocaleString()} pcs ({getPackingProgress(order)}%)
+                            </span>
+                          </div>
+                          {order.packingData.boxes.length > 0 && (
+                            <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                              <span>{order.packingData.boxes.length} boxes</span>
+                              <span>{order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(1)} kg</span>
+                            </div>
+                          )}
+                        </div>
+                        
                         {order.unitPrice && (
                           <>
                             <div className="flex justify-between">
@@ -3732,17 +3849,17 @@ Approved By: _______________________  Date: ___________
         </div>
       )}
 
-    {/* NEW: Cutting Department Modal */}
+{/* NEW: Cutting Department Modal */}
       {showCuttingDept && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-7xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
               <div>
                 <h2 className="text-2xl font-semibold flex items-center gap-2">
                   <Scissors className="text-amber-600" size={28} />
                   Cutting Department
                 </h2>
-                <p className="text-sm text-gray-600 mt-1">Track fabric cutting progress for all orders</p>
+                <p className="text-sm text-gray-600 mt-1">Track fabric cutting progress for all orders with multiple markers</p>
               </div>
               <button
                 onClick={() => setShowCuttingDept(false)}
@@ -3803,7 +3920,7 @@ Approved By: _______________________  Date: ___________
                       </div>
 
                       <div className="p-4">
-                        <div className="grid grid-cols-4 gap-4 mb-4">
+                        <div className="grid grid-cols-5 gap-4 mb-4">
                           <div className="bg-white rounded-lg p-3 border">
                             <p className="text-xs text-gray-600">Total Layers Required</p>
                             <p className="text-2xl font-bold text-gray-900">{order.cuttingData.totalLayersRequired || 0}</p>
@@ -3811,6 +3928,10 @@ Approved By: _______________________  Date: ___________
                           <div className="bg-white rounded-lg p-3 border">
                             <p className="text-xs text-gray-600">Layers Cut</p>
                             <p className="text-2xl font-bold text-green-600">{order.cuttingData.layersCut || 0}</p>
+                          </div>
+                          <div className="bg-white rounded-lg p-3 border">
+                            <p className="text-xs text-gray-600">Total Pieces Cut</p>
+                            <p className="text-2xl font-bold text-purple-600">{order.cuttingData.piecesCut || 0}</p>
                           </div>
                           <div className="bg-white rounded-lg p-3 border">
                             <p className="text-xs text-gray-600">Fabric Used (m)</p>
@@ -3822,8 +3943,134 @@ Approved By: _______________________  Date: ___________
                           </div>
                         </div>
 
+                        {/* Markers Display */}
+                        {order.cuttingData.markers && order.cuttingData.markers.length > 0 && (
+                          <div className="mb-4">
+                            <h4 className="text-xs font-semibold text-gray-700 mb-2">📐 Markers Configured ({order.cuttingData.markers.length})</h4>
+                            <div className="grid grid-cols-2 gap-3">
+                              {order.cuttingData.markers.map((marker, idx) => (
+                                <div key={idx} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <p className="text-sm font-bold text-blue-900">{marker.markerName}</p>
+                                    <button
+                                      onClick={() => {
+                                        if (confirm(`Delete ${marker.markerName}?`)) {
+                                          const updatedOrders = orders.map(o => {
+                                            if (o.id === order.id) {
+                                              return {
+                                                ...o,
+                                                cuttingData: {
+                                                  ...o.cuttingData,
+                                                  markers: o.cuttingData.markers.filter((_, i) => i !== idx)
+                                                }
+                                              };
+                                            }
+                                            return o;
+                                          });
+                                          setOrders(updatedOrders);
+                                        }
+                                      }}
+                                      className="p-1 text-red-600 hover:bg-red-100 rounded"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                  <div className="text-xs text-gray-700 space-y-0.5">
+                                    <p><span className="font-semibold">Pieces/Lay:</span> {marker.piecesPerLay}</p>
+                                    <p><span className="font-semibold">Ratio:</span> {marker.sizeRatio}</p>
+                                    <p><span className="font-semibold">Fabric/Lay:</span> {marker.fabricPerLay}m</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="bg-amber-50 rounded-lg p-4 border-2 border-amber-200">
                           <h4 className="text-sm font-semibold text-gray-700 mb-3">Record Cutting Activity</h4>
+                          
+                          {/* Add New Marker */}
+                          <div className="mb-4 p-3 bg-white border-2 border-blue-300 rounded-lg">
+                            <p className="text-xs font-bold text-blue-900 mb-2">➕ Add New Marker</p>
+                            <div className="grid grid-cols-4 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Marker Name *</label>
+                                <input
+                                  type="text"
+                                  value={newMarker.markerName}
+                                  onChange={(e) => setNewMarker({...newMarker, markerName: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="e.g., Marker 1"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Pieces per Lay *</label>
+                                <input
+                                  type="number"
+                                  value={newMarker.piecesPerLay}
+                                  onChange={(e) => setNewMarker({...newMarker, piecesPerLay: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="e.g., 10"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Size Ratio *</label>
+                                <input
+                                  type="text"
+                                  value={newMarker.sizeRatio}
+                                  onChange={(e) => setNewMarker({...newMarker, sizeRatio: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="e.g., 2-S,3-M,3-L,2-XL"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Fabric per Lay (m) *</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={newMarker.fabricPerLay}
+                                  onChange={(e) => setNewMarker({...newMarker, fabricPerLay: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="e.g., 2.5"
+                                />
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (newMarker.markerName && newMarker.piecesPerLay && newMarker.sizeRatio && newMarker.fabricPerLay) {
+                                  const updatedOrders = orders.map(o => {
+                                    if (o.id === order.id) {
+                                      return {
+                                        ...o,
+                                        cuttingData: {
+                                          ...o.cuttingData,
+                                          markers: [
+                                            ...(o.cuttingData.markers || []),
+                                            {
+                                              markerName: newMarker.markerName,
+                                              piecesPerLay: parseInt(newMarker.piecesPerLay),
+                                              sizeRatio: newMarker.sizeRatio,
+                                              fabricPerLay: parseFloat(newMarker.fabricPerLay)
+                                            }
+                                          ]
+                                        }
+                                      };
+                                    }
+                                    return o;
+                                  });
+                                  setOrders(updatedOrders);
+                                  setNewMarker({ markerName: '', piecesPerLay: '', sizeRatio: '', fabricPerLay: '' });
+                                } else {
+                                  alert('Please fill all marker fields');
+                                }
+                              }}
+                              className="w-full mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                            >
+                              Add Marker
+                            </button>
+                          </div>
+
+                          {/* Daily Cutting Input */}
                           <div className="grid grid-cols-5 gap-3">
                             <div>
                               <label className="block text-xs font-medium text-gray-700 mb-1">Date</label>
@@ -3852,24 +4099,51 @@ Approved By: _______________________  Date: ___________
                               />
                             </div>
                             <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Layers Cut Today</label>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Select Marker *</label>
+                              <select
+                                value={cuttingInput.selectedMarker}
+                                onChange={(e) => setCuttingInput({...cuttingInput, selectedMarker: e.target.value})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                disabled={!order.cuttingData.markers || order.cuttingData.markers.length === 0}
+                              >
+                                <option value="">Choose marker...</option>
+                                {order.cuttingData.markers?.map((marker, idx) => (
+                                  <option key={idx} value={idx}>{marker.markerName}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Layers Cut Today *</label>
                               <input
                                 type="number"
                                 value={cuttingInput.layersCut}
-                                onChange={(e) => setCuttingInput({...cuttingInput, layersCut: e.target.value})}
+                                onChange={(e) => {
+                                  const layers = parseInt(e.target.value) || 0;
+                                  const markerIdx = parseInt(cuttingInput.selectedMarker);
+                                  
+                                  if (!isNaN(markerIdx) && order.cuttingData.markers[markerIdx]) {
+                                    const marker = order.cuttingData.markers[markerIdx];
+                                    const calculatedPieces = layers * marker.piecesPerLay;
+                                    const calculatedFabric = layers * marker.fabricPerLay;
+                                    
+                                    setCuttingInput({
+                                      ...cuttingInput, 
+                                      layersCut: e.target.value,
+                                      calculatedPieces: calculatedPieces,
+                                      calculatedFabric: calculatedFabric
+                                    });
+                                  } else {
+                                    setCuttingInput({
+                                      ...cuttingInput, 
+                                      layersCut: e.target.value,
+                                      calculatedPieces: 0,
+                                      calculatedFabric: 0
+                                    });
+                                  }
+                                }}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                                 placeholder="e.g., 50"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Fabric Used (m)</label>
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={cuttingInput.fabricUsed}
-                                onChange={(e) => setCuttingInput({...cuttingInput, fabricUsed: e.target.value})}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                placeholder="e.g., 125.5"
+                                disabled={!cuttingInput.selectedMarker}
                               />
                             </div>
                             <div>
@@ -3884,6 +4158,28 @@ Approved By: _______________________  Date: ___________
                               />
                             </div>
                           </div>
+
+                          {/* Auto-calculated display */}
+                          {cuttingInput.calculatedPieces > 0 && cuttingInput.selectedMarker !== '' && (
+                            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                              <p className="text-xs font-semibold text-green-900">📊 Auto-calculated from {order.cuttingData.markers[parseInt(cuttingInput.selectedMarker)]?.markerName}:</p>
+                              <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
+                                <div>
+                                  <span className="text-gray-600">Pieces:</span>
+                                  <span className="font-bold text-purple-900 ml-2">{cuttingInput.calculatedPieces}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-600">Fabric:</span>
+                                  <span className="font-bold text-blue-900 ml-2">{cuttingInput.calculatedFabric?.toFixed(2)} m</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-600">Ratio:</span>
+                                  <span className="font-bold text-gray-900 ml-2">{order.cuttingData.markers[parseInt(cuttingInput.selectedMarker)]?.sizeRatio}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           <div className="mt-3">
                             <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
                             <input
@@ -3899,7 +4195,8 @@ Approved By: _______________________  Date: ___________
                               setSelectedOrderForCutting(order);
                               handleAddCuttingData();
                             }}
-                            className="w-full mt-3 flex items-center justify-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors font-medium"
+                            disabled={!cuttingInput.selectedMarker || !cuttingInput.layersCut}
+                            className="w-full mt-3 flex items-center justify-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
                           >
                             <Plus size={18} />
                             Record Cutting Data
@@ -3914,16 +4211,34 @@ Approved By: _______________________  Date: ___________
                                 <thead className="bg-gray-50">
                                   <tr>
                                     <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Date</th>
-                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Layers Cut</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Marker</th>
+                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Layers</th>
+                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Pieces</th>
+                                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Size Ratio</th>
+                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Fabric (m)</th>
+                                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Waste (m)</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {Object.entries(order.cuttingData.dailyCutting).sort((a, b) => b[0].localeCompare(a[0])).map(([date, layers]) => (
-                                    <tr key={date} className="border-t">
-                                      <td className="px-4 py-2">{new Date(date).toLocaleDateString()}</td>
-                                      <td className="px-4 py-2 text-right font-semibold">{layers}</td>
-                                    </tr>
-                                  ))}
+                                  {Object.entries(order.cuttingData.dailyCutting).sort((a, b) => b[0].localeCompare(a[0])).map(([date, data]) => {
+                                    const layers = typeof data === 'number' ? data : data.layers || 0;
+                                    const pieces = typeof data === 'object' ? data.pieces || 0 : 0;
+                                    const fabric = typeof data === 'object' ? data.fabric || 0 : 0;
+                                    const waste = typeof data === 'object' ? data.waste || 0 : 0;
+                                    const sizeRatio = typeof data === 'object' ? data.sizeRatio || '-' : '-';
+                                    const markerName = typeof data === 'object' ? data.markerName || '-' : '-';
+                                    return (
+                                      <tr key={date} className="border-t hover:bg-gray-50">
+                                        <td className="px-4 py-2">{new Date(date).toLocaleDateString()}</td>
+                                        <td className="px-4 py-2 font-semibold text-blue-700">{markerName}</td>
+                                        <td className="px-4 py-2 text-right font-semibold">{layers}</td>
+                                        <td className="px-4 py-2 text-right font-semibold text-purple-600">{pieces}</td>
+                                        <td className="px-4 py-2 text-left text-xs text-gray-600">{sizeRatio}</td>
+                                        <td className="px-4 py-2 text-right font-semibold text-blue-600">{fabric.toFixed(2)}</td>
+                                        <td className="px-4 py-2 text-right font-semibold text-red-600">{waste.toFixed(2)}</td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>
@@ -3945,6 +4260,7 @@ Approved By: _______________________  Date: ___________
           </div>
         </div>
       )}
+
 
       {/* NEW: Packing Department Modal */}
       {showPackingDept && (
