@@ -46,9 +46,11 @@ const App = () => {
       cuttingData: {
         totalLayersRequired: 0,
         layersCut: 0,
+        piecesCut: 0,
         fabricUsed: 0,
         fabricWastage: 0,
         dailyCutting: {},
+        markers: [], // ADD THIS LINE
         cuttingNotes: ''
       },
       packingData: {
@@ -73,7 +75,7 @@ const App = () => {
   const [newHoliday, setNewHoliday] = useState({ date: '', name: '' });
   const [workingHours, setWorkingHours] = useState(10);
   const [workStartHour, setWorkStartHour] = useState(7);
-
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [showLineManager, setShowLineManager] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -201,7 +203,7 @@ const App = () => {
       fabricUsed: 0,
       fabricWastage: 0,
       dailyCutting: {},
-      markers: [], // Array of marker objects
+      markers: [], // ADD THIS LINE
       cuttingNotes: ''
     },
     packingData: {
@@ -266,6 +268,25 @@ const App = () => {
     };
     loadData();
   }, []);
+
+
+  React.useEffect(() => {
+    const needsMigration = orders.some(order => 
+      !order.cuttingData.markers || !Array.isArray(order.cuttingData.markers)
+    );
+    
+    if (needsMigration) {
+      const migratedOrders = orders.map(order => ({
+        ...order,
+        cuttingData: {
+          ...order.cuttingData,
+          markers: order.cuttingData.markers || [],
+          piecesCut: order.cuttingData.piecesCut || 0
+        }
+      }));
+      setOrders(migratedOrders);
+    }
+  }, []); 
 
   React.useEffect(() => {
     if (!isElectron) return;
@@ -1045,12 +1066,13 @@ const handleDeleteCuttingEntry = (order, date) => {
         hourlyRejects: {},
         trims: [],
         lineSchedules,
-                cuttingData: {
+        cuttingData: {
           totalLayersRequired: 0,
           layersCut: 0,
           fabricUsed: 0,
           fabricWastage: 0,
           dailyCutting: {},
+          markers: [], // ADD THIS LINE
           cuttingNotes: ''
         },
         packingData: {
@@ -1080,15 +1102,16 @@ const handleDeleteCuttingEntry = (order, date) => {
         hourlyProduction: {},
         hourlyRejects: {},
         trims: [],
-                cuttingData: {
+        cuttingData: {
           totalLayersRequired: 0,
           layersCut: 0,
           fabricUsed: 0,
           fabricWastage: 0,
           dailyCutting: {},
+          markers: [], // ADD THIS LINE
           cuttingNotes: ''
         },
-        packingData: {
+                packingData: {
           totalPacked: 0,
           boxes: [],
           packingNotes: ''
@@ -2220,11 +2243,72 @@ const handleDeleteCuttingEntry = (order, date) => {
           <div className="flex-shrink-0 bg-white border-b p-4 z-10">
             <h2 className="text-lg font-semibold text-gray-900">Active Orders</h2>
             <p className="text-sm text-gray-600 mt-1">{orders.length} orders in production</p>
+            
+            {/* Search Filter */}
+            <div className="mt-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={orderSearchQuery}
+                  onChange={(e) => setOrderSearchQuery(e.target.value)}
+                  placeholder="Search orders..."
+                  className="w-full px-3 py-2 pl-9 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <svg
+                  className="absolute left-3 top-2.5 h-4 w-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                {orderSearchQuery && (
+                  <button
+                    onClick={() => setOrderSearchQuery('')}
+                    className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+              {orderSearchQuery && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Showing {orders.filter(order => {
+                    const searchLower = orderSearchQuery.toLowerCase();
+                    return (
+                      order.orderNumber.toLowerCase().includes(searchLower) ||
+                      order.client.toLowerCase().includes(searchLower) ||
+                      order.garmentType.toLowerCase().includes(searchLower) ||
+                      order.status.toLowerCase().includes(searchLower) ||
+                      (order.notes && order.notes.toLowerCase().includes(searchLower)) ||
+                      order.linesAssigned.some(line => line.toLowerCase().includes(searchLower))
+                    );
+                  }).length} of {orders.length} orders
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Scrollable Content */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {orders.map(order => {
+            {orders.filter(order => {
+              if (!orderSearchQuery) return true;
+              
+              const searchLower = orderSearchQuery.toLowerCase();
+              return (
+                order.orderNumber.toLowerCase().includes(searchLower) ||
+                order.client.toLowerCase().includes(searchLower) ||
+                order.garmentType.toLowerCase().includes(searchLower) ||
+                order.status.toLowerCase().includes(searchLower) ||
+                (order.notes && order.notes.toLowerCase().includes(searchLower)) ||
+                order.linesAssigned.some(line => line.toLowerCase().includes(searchLower))
+              );
+            }).map(order => {
               const targetStatus = checkTargetMet(order);
               const orderValue = (parseInt(order.quantity || 0) * parseFloat(order.unitPrice || 0));
               const trimsStatus = getTrimsStatus(order);
@@ -2235,6 +2319,7 @@ const handleDeleteCuttingEntry = (order, date) => {
 
               return (
                 <div key={order.id} className="bg-gray-50 rounded-lg p-3 border border-gray-200 hover:border-gray-300 transition-colors">
+                  {/* ... rest of the order card code remains the same ... */}
                   {editingOrder?.id === order.id ? (
                     <div className="space-y-2">
                       <input
@@ -2497,62 +2582,55 @@ const handleDeleteCuttingEntry = (order, date) => {
                         </div>
                       </div>
                       
-                        <div className="space-y-1.5 text-xs">
+                      <div className="space-y-1.5 text-xs">
                         <div className="flex justify-between">
                           <span className="text-gray-500">Type:</span>
                           <span className="font-medium text-gray-900">{order.garmentType}</span>
                         </div>
                         
-                        {/* Target Section */}
                         <div className="flex justify-between">
                           <span className="text-gray-500">Target:</span>
                           <span className="font-medium text-gray-900">{parseInt(order.quantity).toLocaleString()} pcs</span>
                         </div>
                         
-                      {/* Cutting Summary (below Target) */}
-                      <div className="pl-4 border-l-2 border-amber-300 bg-amber-50 py-1 px-2 rounded-r">
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-600 flex items-center gap-1">
-                            <Scissors size={12} className="text-amber-600" />
-                            Cutting:
-                          </span>
-                          <span className={`font-semibold ${
-                            getCuttingProgress(order) >= 100 ? 'text-green-600' :
-                            getCuttingProgress(order) >= 75 ? 'text-blue-600' :
-                            getCuttingProgress(order) >= 50 ? 'text-yellow-600' :
-                            'text-orange-600'
-                          }`}>
-                            {order.cuttingData.layersCut}/{order.cuttingData.totalLayersRequired || 0} layers ({getCuttingProgress(order)}%)
-                          </span>
-                        </div>
-                        
-                        {/* Total Pieces Cut */}
-                        <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
-                          <span>Total Pieces:</span>
-                          <span className="font-bold text-purple-700">{(order.cuttingData.piecesCut || 0).toLocaleString()} pcs</span>
-                        </div>
-                        
-                        {/* Fabric Usage */}
-                        <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
-                          <span>Fabric Used:</span>
-                          <span className="font-bold text-blue-700">{(order.cuttingData.fabricUsed || 0).toFixed(2)} m</span>
-                        </div>
-                        
-                        {/* Fabric Wastage */}
-                        <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
-                          <span>Wastage:</span>
-                          <span className="font-bold text-red-600">{(order.cuttingData.fabricWastage || 0).toFixed(2)} m</span>
-                        </div>
-                        
-                        {/* Markers Count */}
-                        {order.cuttingData.markers && order.cuttingData.markers.length > 0 && (
-                          <div className="mt-0.5 text-[10px] text-gray-600 italic">
-                            <span>{order.cuttingData.markers.length} marker{order.cuttingData.markers.length > 1 ? 's' : ''} configured</span>
+                        <div className="pl-4 border-l-2 border-amber-300 bg-amber-50 py-1 px-2 rounded-r">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 flex items-center gap-1">
+                              <Scissors size={12} className="text-amber-600" />
+                              Cutting:
+                            </span>
+                            <span className={`font-semibold ${
+                              getCuttingProgress(order) >= 100 ? 'text-green-600' :
+                              getCuttingProgress(order) >= 75 ? 'text-blue-600' :
+                              getCuttingProgress(order) >= 50 ? 'text-yellow-600' :
+                              'text-orange-600'
+                            }`}>
+                              {order.cuttingData.layersCut}/{order.cuttingData.totalLayersRequired || 0} layers ({getCuttingProgress(order)}%)
+                            </span>
                           </div>
-                        )}
-                      </div>
+                          
+                          <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                            <span>Total Pieces:</span>
+                            <span className="font-bold text-purple-700">{(order.cuttingData.piecesCut || 0).toLocaleString()} pcs</span>
+                          </div>
+                          
+                          <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                            <span>Fabric Used:</span>
+                            <span className="font-bold text-blue-700">{(order.cuttingData.fabricUsed || 0).toFixed(2)} m</span>
+                          </div>
+                          
+                          <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                            <span>Wastage:</span>
+                            <span className="font-bold text-red-600">{(order.cuttingData.fabricWastage || 0).toFixed(2)} m</span>
+                          </div>
+                          
+                          {order.cuttingData.markers && order.cuttingData.markers.length > 0 && (
+                            <div className="mt-0.5 text-[10px] text-gray-600 italic">
+                              <span>{order.cuttingData.markers.length} marker{order.cuttingData.markers.length > 1 ? 's' : ''} configured</span>
+                            </div>
+                          )}
+                        </div>
                         
-                        {/* Produced Section */}
                         <div className="flex justify-between">
                           <span className="text-gray-500">Produced:</span>
                           <span className={`font-bold ${
@@ -2564,7 +2642,6 @@ const handleDeleteCuttingEntry = (order, date) => {
                           </span>
                         </div>
                         
-                        {/* Packing Summary (below Produced) */}
                         <div className="pl-4 border-l-2 border-teal-300 bg-teal-50 py-1 px-2 rounded-r">
                           <div className="flex justify-between items-center">
                             <span className="text-gray-600 flex items-center gap-1">
@@ -2690,11 +2767,37 @@ const handleDeleteCuttingEntry = (order, date) => {
               );
             })}
             
-            {orders.length === 0 && (
+            {orders.filter(order => {
+              if (!orderSearchQuery) return true;
+              
+              const searchLower = orderSearchQuery.toLowerCase();
+              return (
+                order.orderNumber.toLowerCase().includes(searchLower) ||
+                order.client.toLowerCase().includes(searchLower) ||
+                order.garmentType.toLowerCase().includes(searchLower) ||
+                order.status.toLowerCase().includes(searchLower) ||
+                (order.notes && order.notes.toLowerCase().includes(searchLower)) ||
+                order.linesAssigned.some(line => line.toLowerCase().includes(searchLower))
+              );
+            }).length === 0 && (
               <div className="text-center py-12 text-gray-500">
                 <Package className="mx-auto mb-3 text-gray-300" size={48} />
-                <p className="text-sm">No active orders</p>
-                <p className="text-xs text-gray-400 mt-1">Click "New Order" to get started</p>
+                {orderSearchQuery ? (
+                  <>
+                    <p className="text-sm">No orders match "{orderSearchQuery}"</p>
+                    <button
+                      onClick={() => setOrderSearchQuery('')}
+                      className="text-xs text-blue-600 hover:text-blue-700 mt-2"
+                    >
+                      Clear search
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm">No active orders</p>
+                    <p className="text-xs text-gray-400 mt-1">Click "New Order" to get started</p>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -4448,40 +4551,45 @@ const handleDeleteCuttingEntry = (order, date) => {
                                 ))}
                               </select>
                             </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Layers Cut Today *</label>
-                              <input
-                                type="number"
-                                value={cuttingInput.layersCut}
-                                onChange={(e) => {
-                                  const layers = parseInt(e.target.value) || 0;
-                                  const markerIdx = parseInt(cuttingInput.selectedMarker);
-                                  
-                                  if (!isNaN(markerIdx) && order.cuttingData.markers[markerIdx]) {
-                                    const marker = order.cuttingData.markers[markerIdx];
-                                    const calculatedPieces = layers * marker.piecesPerLay;
-                                    const calculatedFabric = layers * marker.fabricPerLay;
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Layers Cut Today *</label>
+                                <input
+                                  type="number"
+                                  value={cuttingInput.layersCut}
+                                  onChange={(e) => {
+                                    const layers = parseInt(e.target.value) || 0;
+                                    const markerIdx = cuttingInput.selectedMarker !== '' ? parseInt(cuttingInput.selectedMarker) : null;
                                     
-                                    setCuttingInput({
-                                      ...cuttingInput, 
-                                      layersCut: e.target.value,
-                                      calculatedPieces: calculatedPieces,
-                                      calculatedFabric: calculatedFabric
-                                    });
-                                  } else {
-                                    setCuttingInput({
-                                      ...cuttingInput, 
-                                      layersCut: e.target.value,
-                                      calculatedPieces: 0,
-                                      calculatedFabric: 0
-                                    });
-                                  }
-                                }}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                placeholder="e.g., 50"
-                                disabled={!cuttingInput.selectedMarker}
-                              />
-                            </div>
+                                    // Only calculate if we have a valid marker selected
+                                    if (markerIdx !== null && !isNaN(markerIdx) && 
+                                        order.cuttingData.markers && 
+                                        Array.isArray(order.cuttingData.markers) && 
+                                        order.cuttingData.markers[markerIdx]) {
+                                      const marker = order.cuttingData.markers[markerIdx];
+                                      const calculatedPieces = layers * (marker.piecesPerLay || 0);
+                                      const calculatedFabric = layers * (marker.fabricPerLay || 0);
+                                      
+                                      setCuttingInput({
+                                        ...cuttingInput, 
+                                        layersCut: e.target.value,
+                                        calculatedPieces: calculatedPieces,
+                                        calculatedFabric: calculatedFabric
+                                      });
+                                    } else {
+                                      // No valid marker selected, just update the layers
+                                      setCuttingInput({
+                                        ...cuttingInput, 
+                                        layersCut: e.target.value,
+                                        calculatedPieces: 0,
+                                        calculatedFabric: 0
+                                      });
+                                    }
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="e.g., 50"
+                                  disabled={!cuttingInput.selectedMarker || !order.cuttingData.markers || order.cuttingData.markers.length === 0}
+                                />
+                              </div>
                             <div>
                               <label className="block text-xs font-medium text-gray-700 mb-1">Wastage (m)</label>
                               <input
@@ -4496,9 +4604,14 @@ const handleDeleteCuttingEntry = (order, date) => {
                           </div>
 
                           {/* Auto-calculated display */}
-                          {cuttingInput.calculatedPieces > 0 && cuttingInput.selectedMarker !== '' && (
+                          {cuttingInput.calculatedPieces > 0 && 
+                          cuttingInput.selectedMarker !== '' && 
+                          order.cuttingData.markers && 
+                          order.cuttingData.markers[parseInt(cuttingInput.selectedMarker)] && (
                             <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                              <p className="text-xs font-semibold text-green-900">📊 Auto-calculated from {order.cuttingData.markers[parseInt(cuttingInput.selectedMarker)]?.markerName}:</p>
+                              <p className="text-xs font-semibold text-green-900">
+                                📊 Auto-calculated from {order.cuttingData.markers[parseInt(cuttingInput.selectedMarker)]?.markerName || 'Selected Marker'}:
+                              </p>
                               <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
                                 <div>
                                   <span className="text-gray-600">Pieces:</span>
@@ -4506,11 +4619,13 @@ const handleDeleteCuttingEntry = (order, date) => {
                                 </div>
                                 <div>
                                   <span className="text-gray-600">Fabric:</span>
-                                  <span className="font-bold text-blue-900 ml-2">{cuttingInput.calculatedFabric?.toFixed(2)} m</span>
+                                  <span className="font-bold text-blue-900 ml-2">{cuttingInput.calculatedFabric?.toFixed(2) || '0.00'} m</span>
                                 </div>
                                 <div>
                                   <span className="text-gray-600">Ratio:</span>
-                                  <span className="font-bold text-gray-900 ml-2">{order.cuttingData.markers[parseInt(cuttingInput.selectedMarker)]?.sizeRatio}</span>
+                                  <span className="font-bold text-gray-900 ml-2">
+                                    {order.cuttingData.markers[parseInt(cuttingInput.selectedMarker)]?.sizeRatio || 'N/A'}
+                                  </span>
                                 </div>
                               </div>
                             </div>
