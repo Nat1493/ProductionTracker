@@ -123,6 +123,14 @@ const App = () => {
     calculatedFabric: 0,
     notes: ''
   });
+  const [editingCuttingEntry, setEditingCuttingEntry] = useState(null);
+  const [editCuttingData, setEditCuttingData] = useState({
+    date: '',
+    markerIndex: '',
+    layersCut: '',
+    fabricWastage: '',
+    notes: ''
+  });
 
   const [newMarker, setNewMarker] = useState({
     markerName: '',
@@ -202,6 +210,37 @@ const App = () => {
       packingNotes: ''
     }
   });
+
+  // Helper function to calculate pieces per lay from size ratio
+    const calculatePiecesFromSizeRatio = (sizeRatio) => {
+      if (!sizeRatio || sizeRatio.trim() === '') return 0;
+      
+      try {
+        // Split by comma to get each size entry
+        const entries = sizeRatio.split(',').map(e => e.trim());
+        let totalPieces = 0;
+        
+        for (const entry of entries) {
+          // Find the FIRST dash to split quantity from size name
+          const firstDashIndex = entry.indexOf('-');
+          if (firstDashIndex === -1) continue;
+          
+          // Get quantity (everything before first dash)
+          const quantityStr = entry.substring(0, firstDashIndex).trim();
+          const quantity = parseInt(quantityStr);
+          
+          if (!isNaN(quantity) && quantity > 0) {
+            totalPieces += quantity;
+          }
+        }
+        
+        return totalPieces;
+      } catch (error) {
+        console.error('Error parsing size ratio:', error);
+        return 0;
+      }
+    };
+
 
   React.useEffect(() => {
     const loadData = async () => {
@@ -511,7 +550,12 @@ const App = () => {
 
     const layersCut = parseInt(cuttingInput.layersCut || 0);
     const markerIdx = parseInt(cuttingInput.selectedMarker);
-    const marker = selectedOrderForCutting.cuttingData.markers[markerIdx];
+    
+    // Find the current order from state (not from selectedOrderForCutting)
+    const currentOrder = orders.find(o => o.id === selectedOrderForCutting.id);
+    if (!currentOrder) return;
+    
+    const marker = currentOrder.cuttingData.markers[markerIdx];
     
     if (!marker) {
       alert('Please select a valid marker!');
@@ -522,33 +566,49 @@ const App = () => {
     const fabricUsed = layersCut * marker.fabricPerLay;
     const fabricWastage = parseFloat(cuttingInput.fabricWastage || 0);
 
-    const updatedOrders = orders.map(order => {
+    setOrders(prevOrders => prevOrders.map(order => {
       if (order.id === selectedOrderForCutting.id) {
+        // Get existing dailyCutting
+        const existingDailyCutting = { ...(order.cuttingData.dailyCutting || {}) };
+        
+        // Get existing data for this date
+        const existingDateData = existingDailyCutting[cuttingDate] || {
+          layers: 0,
+          pieces: 0,
+          fabric: 0,
+          waste: 0
+        };
+        
+        // Update the entry for this date
+        existingDailyCutting[cuttingDate] = {
+          layers: existingDateData.layers + layersCut,
+          pieces: existingDateData.pieces + piecesCut,
+          fabric: existingDateData.fabric + fabricUsed,
+          waste: existingDateData.waste + fabricWastage,
+          sizeRatio: marker.sizeRatio,
+          markerName: marker.markerName
+        };
+        
         const newCuttingData = {
           ...order.cuttingData,
           layersCut: (order.cuttingData.layersCut || 0) + layersCut,
           piecesCut: (order.cuttingData.piecesCut || 0) + piecesCut,
           fabricUsed: (order.cuttingData.fabricUsed || 0) + fabricUsed,
           fabricWastage: (order.cuttingData.fabricWastage || 0) + fabricWastage,
-          dailyCutting: {
-            ...order.cuttingData.dailyCutting,
-            [cuttingDate]: {
-              layers: (order.cuttingData.dailyCutting?.[cuttingDate]?.layers || 0) + layersCut,
-              pieces: (order.cuttingData.dailyCutting?.[cuttingDate]?.pieces || 0) + piecesCut,
-              fabric: (order.cuttingData.dailyCutting?.[cuttingDate]?.fabric || 0) + fabricUsed,
-              waste: (order.cuttingData.dailyCutting?.[cuttingDate]?.waste || 0) + fabricWastage,
-              sizeRatio: marker.sizeRatio,
-              markerName: marker.markerName
-            }
-          },
+          dailyCutting: existingDailyCutting,
           cuttingNotes: cuttingInput.notes || order.cuttingData.cuttingNotes
         };
-        return { ...order, cuttingData: newCuttingData };
+        
+        const updatedOrder = { ...order, cuttingData: newCuttingData };
+        
+        // Update selectedOrderForCutting immediately
+        setSelectedOrderForCutting(updatedOrder);
+        
+        return updatedOrder;
       }
       return order;
-    });
+    }));
 
-    setOrders(updatedOrders);
     setCuttingInput({ 
       selectedMarker: cuttingInput.selectedMarker,
       layersCut: '', 
@@ -559,7 +619,129 @@ const App = () => {
     });
   };
 
+const handleDeleteCuttingEntry = (order, date) => {
+    if (!confirm(`Delete cutting entry for ${date}?`)) return;
+    
+    const updatedOrders = orders.map(o => {
+      if (o.id === order.id) {
+        const oldEntry = o.cuttingData.dailyCutting[date];
+        const newDailyCutting = { ...o.cuttingData.dailyCutting };
+        delete newDailyCutting[date];
+        
+        // Recalculate totals
+        const newLayersCut = (o.cuttingData.layersCut || 0) - (typeof oldEntry === 'number' ? oldEntry : oldEntry.layers || 0);
+        const newPiecesCut = (o.cuttingData.piecesCut || 0) - (typeof oldEntry === 'object' ? oldEntry.pieces || 0 : 0);
+        const newFabricUsed = (o.cuttingData.fabricUsed || 0) - (typeof oldEntry === 'object' ? oldEntry.fabric || 0 : 0);
+        const newFabricWastage = (o.cuttingData.fabricWastage || 0) - (typeof oldEntry === 'object' ? oldEntry.waste || 0 : 0);
+        
+        return {
+          ...o,
+          cuttingData: {
+            ...o.cuttingData,
+            dailyCutting: newDailyCutting,
+            layersCut: Math.max(0, newLayersCut),
+            piecesCut: Math.max(0, newPiecesCut),
+            fabricUsed: Math.max(0, newFabricUsed),
+            fabricWastage: Math.max(0, newFabricWastage)
+          }
+        };
+      }
+      return o;
+    });
+    
+    setOrders(updatedOrders);
+  };
 
+  const handleEditCuttingEntry = (order, date, entry) => {
+    setEditingCuttingEntry({ orderId: order.id, date: date });
+    
+    // Find the marker index
+    let markerIndex = '';
+    if (entry.markerName && order.cuttingData.markers) {
+      const idx = order.cuttingData.markers.findIndex(m => m.markerName === entry.markerName);
+      if (idx !== -1) markerIndex = String(idx);
+    }
+    
+    setEditCuttingData({
+      date: date,
+      markerIndex: markerIndex,
+      layersCut: String(typeof entry === 'number' ? entry : entry.layers || 0),
+      fabricWastage: String(typeof entry === 'object' ? entry.waste || 0 : 0),
+      notes: ''
+    });
+  };
+
+    const handleSaveEditedCuttingEntry = (order) => {
+      if (!editCuttingData.layersCut || editCuttingData.markerIndex === '') {
+        alert('Please fill in all required fields');
+        return;
+      }
+      
+      const markerIdx = parseInt(editCuttingData.markerIndex);
+      const marker = order.cuttingData.markers[markerIdx];
+      
+      if (!marker) {
+        alert('Please select a valid marker');
+        return;
+      }
+      
+      const newLayersCut = parseInt(editCuttingData.layersCut);
+      const newFabricWastage = parseFloat(editCuttingData.fabricWastage || 0);
+      const newPiecesCut = newLayersCut * marker.piecesPerLay;
+      const newFabricUsed = newLayersCut * marker.fabricPerLay;
+      
+      const updatedOrders = orders.map(o => {
+        if (o.id === order.id) {
+          const oldEntry = o.cuttingData.dailyCutting[editingCuttingEntry.date];
+          const oldLayers = typeof oldEntry === 'number' ? oldEntry : oldEntry.layers || 0;
+          const oldPieces = typeof oldEntry === 'object' ? oldEntry.pieces || 0 : 0;
+          const oldFabric = typeof oldEntry === 'object' ? oldEntry.fabric || 0 : 0;
+          const oldWaste = typeof oldEntry === 'object' ? oldEntry.waste || 0 : 0;
+          
+          // Update the specific entry
+          const newDailyCutting = {
+            ...o.cuttingData.dailyCutting,
+            [editCuttingData.date]: {
+              layers: newLayersCut,
+              pieces: newPiecesCut,
+              fabric: newFabricUsed,
+              waste: newFabricWastage,
+              sizeRatio: marker.sizeRatio,
+              markerName: marker.markerName
+            }
+          };
+          
+          // Recalculate totals
+          const totalLayersCut = (o.cuttingData.layersCut || 0) - oldLayers + newLayersCut;
+          const totalPiecesCut = (o.cuttingData.piecesCut || 0) - oldPieces + newPiecesCut;
+          const totalFabricUsed = (o.cuttingData.fabricUsed || 0) - oldFabric + newFabricUsed;
+          const totalFabricWastage = (o.cuttingData.fabricWastage || 0) - oldWaste + newFabricWastage;
+          
+          return {
+            ...o,
+            cuttingData: {
+              ...o.cuttingData,
+              dailyCutting: newDailyCutting,
+              layersCut: totalLayersCut,
+              piecesCut: totalPiecesCut,
+              fabricUsed: totalFabricUsed,
+              fabricWastage: totalFabricWastage
+            }
+          };
+        }
+        return o;
+      });
+      
+      setOrders(updatedOrders);
+      setEditingCuttingEntry(null);
+      setEditCuttingData({
+        date: '',
+        markerIndex: '',
+        layersCut: '',
+        fabricWastage: '',
+        notes: ''
+      });
+    };
 
   const getCuttingProgress = (order) => {
     if (!order.cuttingData.totalLayersRequired || order.cuttingData.totalLayersRequired === 0) {
@@ -577,11 +759,10 @@ const App = () => {
     return { status: 'behind', label: 'Behind Schedule', color: 'red' };
   };
 
-  // Enhanced handleAddPackingBox function (replace existing)
   const handleAddPackingBox = () => {
     if (!selectedOrderForPacking || !packingBox.boxNo || !packingBox.quantity) return;
 
-    const updatedOrders = orders.map(order => {
+    setOrders(prevOrders => prevOrders.map(order => {
       if (order.id === selectedOrderForPacking.id) {
         const newBox = {
           id: Date.now(),
@@ -593,22 +774,26 @@ const App = () => {
           date: new Date().toISOString().split('T')[0]
         };
 
+        // Preserve all existing boxes and add new one
         const updatedBoxes = [...(order.packingData.boxes || []), newBox];
         const totalPacked = updatedBoxes.reduce((sum, box) => sum + box.quantity, 0);
 
-        return {
+        const updatedOrder = {
           ...order,
           packingData: {
             ...order.packingData,
             boxes: updatedBoxes,
-            totalPacked
+            totalPacked: totalPacked
           }
         };
+        
+        // Update selectedOrderForPacking with fresh data
+        setSelectedOrderForPacking(updatedOrder);
+        
+        return updatedOrder;
       }
       return order;
-    });
-
-    setOrders(updatedOrders);
+    }));
     
     // Auto-increment box number for next entry
     const nextBoxNo = String(parseInt(packingBox.boxNo) + 1).padStart(packingBox.boxNo.length, '0');
@@ -621,14 +806,13 @@ const App = () => {
     });
   };
 
-  // NEW: Bulk Box Generation
   const handleBulkAddBoxes = () => {
     if (!selectedOrderForPacking || !bulkPacking.startBoxNo || !bulkPacking.numberOfBoxes || !bulkPacking.quantityPerBox) {
       alert('Please fill in all required fields');
       return;
     }
 
-    const updatedOrders = orders.map(order => {
+    setOrders(prevOrders => prevOrders.map(order => {
       if (order.id === selectedOrderForPacking.id) {
         const newBoxes = [];
         const startNum = parseInt(bulkPacking.startBoxNo);
@@ -649,22 +833,27 @@ const App = () => {
           });
         }
 
+        // Preserve all existing boxes and add new ones
         const updatedBoxes = [...(order.packingData.boxes || []), ...newBoxes];
         const totalPacked = updatedBoxes.reduce((sum, box) => sum + box.quantity, 0);
 
-        return {
+        const updatedOrder = {
           ...order,
           packingData: {
             ...order.packingData,
             boxes: updatedBoxes,
-            totalPacked
+            totalPacked: totalPacked
           }
         };
+        
+        // Update selectedOrderForPacking with fresh data
+        setSelectedOrderForPacking(updatedOrder);
+        
+        return updatedOrder;
       }
       return order;
-    });
+    }));
 
-    setOrders(updatedOrders);
     setBulkPacking({
       startBoxNo: '',
       numberOfBoxes: '',
@@ -694,24 +883,27 @@ const App = () => {
 
 
   const handleDeleteBox = (boxId) => {
-    const updatedOrders = orders.map(order => {
+    setOrders(prevOrders => prevOrders.map(order => {
       if (order.id === selectedOrderForPacking.id) {
         const updatedBoxes = order.packingData.boxes.filter(box => box.id !== boxId);
         const totalPacked = updatedBoxes.reduce((sum, box) => sum + box.quantity, 0);
         
-        return {
+        const updatedOrder = {
           ...order,
           packingData: {
             ...order.packingData,
             boxes: updatedBoxes,
-            totalPacked
+            totalPacked: totalPacked
           }
         };
+        
+        // Update selectedOrderForPacking with fresh data
+        setSelectedOrderForPacking(updatedOrder);
+        
+        return updatedOrder;
       }
       return order;
-    });
-
-    setOrders(updatedOrders);
+    }));
   };
 
   const getPackingProgress = (order) => {
@@ -2317,39 +2509,48 @@ const App = () => {
                           <span className="font-medium text-gray-900">{parseInt(order.quantity).toLocaleString()} pcs</span>
                         </div>
                         
-                        {/* Cutting Summary (below Target) */}
-                        <div className="pl-4 border-l-2 border-amber-300 bg-amber-50 py-1 px-2 rounded-r">
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-600 flex items-center gap-1">
-                              <Scissors size={12} className="text-amber-600" />
-                              Cutting:
-                            </span>
-                            <span className={`font-semibold ${
-                              getCuttingProgress(order) >= 100 ? 'text-green-600' :
-                              getCuttingProgress(order) >= 75 ? 'text-blue-600' :
-                              getCuttingProgress(order) >= 50 ? 'text-yellow-600' :
-                              'text-orange-600'
-                            }`}>
-                              {order.cuttingData.layersCut}/{order.cuttingData.totalLayersRequired || 0} layers ({getCuttingProgress(order)}%)
-                            </span>
-                          </div>
-                          {order.cuttingData.piecesCut > 0 && (
-                            <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
-                              <span className="font-semibold text-purple-600">{order.cuttingData.piecesCut.toLocaleString()} pieces cut</span>
-                            </div>
-                          )}
-                          {order.cuttingData.markers && order.cuttingData.markers.length > 0 && (
-                            <div className="mt-0.5 text-[10px] text-gray-600">
-                              <span>{order.cuttingData.markers.length} marker{order.cuttingData.markers.length > 1 ? 's' : ''} configured</span>
-                            </div>
-                          )}
-                          {order.cuttingData.fabricUsed > 0 && (
-                            <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
-                              <span>Fabric: {order.cuttingData.fabricUsed?.toFixed(1)}m</span>
-                              <span>Waste: {order.cuttingData.fabricWastage?.toFixed(1)}m</span>
-                            </div>
-                          )}
+                      {/* Cutting Summary (below Target) */}
+                      <div className="pl-4 border-l-2 border-amber-300 bg-amber-50 py-1 px-2 rounded-r">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 flex items-center gap-1">
+                            <Scissors size={12} className="text-amber-600" />
+                            Cutting:
+                          </span>
+                          <span className={`font-semibold ${
+                            getCuttingProgress(order) >= 100 ? 'text-green-600' :
+                            getCuttingProgress(order) >= 75 ? 'text-blue-600' :
+                            getCuttingProgress(order) >= 50 ? 'text-yellow-600' :
+                            'text-orange-600'
+                          }`}>
+                            {order.cuttingData.layersCut}/{order.cuttingData.totalLayersRequired || 0} layers ({getCuttingProgress(order)}%)
+                          </span>
                         </div>
+                        
+                        {/* Total Pieces Cut */}
+                        <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                          <span>Total Pieces:</span>
+                          <span className="font-bold text-purple-700">{(order.cuttingData.piecesCut || 0).toLocaleString()} pcs</span>
+                        </div>
+                        
+                        {/* Fabric Usage */}
+                        <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                          <span>Fabric Used:</span>
+                          <span className="font-bold text-blue-700">{(order.cuttingData.fabricUsed || 0).toFixed(2)} m</span>
+                        </div>
+                        
+                        {/* Fabric Wastage */}
+                        <div className="flex justify-between mt-0.5 text-[10px] text-gray-600">
+                          <span>Wastage:</span>
+                          <span className="font-bold text-red-600">{(order.cuttingData.fabricWastage || 0).toFixed(2)} m</span>
+                        </div>
+                        
+                        {/* Markers Count */}
+                        {order.cuttingData.markers && order.cuttingData.markers.length > 0 && (
+                          <div className="mt-0.5 text-[10px] text-gray-600 italic">
+                            <span>{order.cuttingData.markers.length} marker{order.cuttingData.markers.length > 1 ? 's' : ''} configured</span>
+                          </div>
+                        )}
+                      </div>
                         
                         {/* Produced Section */}
                         <div className="flex justify-between">
@@ -4100,86 +4301,110 @@ const App = () => {
                         <div className="bg-amber-50 rounded-lg p-4 border-2 border-amber-200">
                           <h4 className="text-sm font-semibold text-gray-700 mb-3">Record Cutting Activity</h4>
                           
-                          {/* Add New Marker */}
-                          <div className="mb-4 p-3 bg-white border-2 border-blue-300 rounded-lg">
-                            <p className="text-xs font-bold text-blue-900 mb-2">➕ Add New Marker</p>
-                            <div className="grid grid-cols-4 gap-3">
-                              <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Marker Name *</label>
-                                <input
-                                  type="text"
-                                  value={newMarker.markerName}
-                                  onChange={(e) => setNewMarker({...newMarker, markerName: e.target.value})}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  placeholder="e.g., Marker 1"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Pieces per Lay *</label>
-                                <input
-                                  type="number"
-                                  value={newMarker.piecesPerLay}
-                                  onChange={(e) => setNewMarker({...newMarker, piecesPerLay: e.target.value})}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  placeholder="e.g., 10"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Size Ratio *</label>
-                                <input
-                                  type="text"
-                                  value={newMarker.sizeRatio}
-                                  onChange={(e) => setNewMarker({...newMarker, sizeRatio: e.target.value})}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  placeholder="e.g., 2-S,3-M,3-L,2-XL"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Fabric per Lay (m) *</label>
-                                <input
-                                  type="number"
-                                  step="0.1"
-                                  value={newMarker.fabricPerLay}
-                                  onChange={(e) => setNewMarker({...newMarker, fabricPerLay: e.target.value})}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  placeholder="e.g., 2.5"
-                                />
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => {
-                                if (newMarker.markerName && newMarker.piecesPerLay && newMarker.sizeRatio && newMarker.fabricPerLay) {
-                                  const updatedOrders = orders.map(o => {
-                                    if (o.id === order.id) {
-                                      return {
-                                        ...o,
-                                        cuttingData: {
-                                          ...o.cuttingData,
-                                          markers: [
-                                            ...(o.cuttingData.markers || []),
-                                            {
-                                              markerName: newMarker.markerName,
-                                              piecesPerLay: parseInt(newMarker.piecesPerLay),
-                                              sizeRatio: newMarker.sizeRatio,
-                                              fabricPerLay: parseFloat(newMarker.fabricPerLay)
-                                            }
-                                          ]
-                                        }
-                                      };
-                                    }
-                                    return o;
-                                  });
-                                  setOrders(updatedOrders);
-                                  setNewMarker({ markerName: '', piecesPerLay: '', sizeRatio: '', fabricPerLay: '' });
-                                } else {
-                                  alert('Please fill all marker fields');
-                                }
-                              }}
-                              className="w-full mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                            >
-                              Add Marker
-                            </button>
+                      {/* Add New Marker */}
+                      <div className="mb-4 p-3 bg-white border-2 border-blue-300 rounded-lg">
+                        <p className="text-xs font-bold text-blue-900 mb-2">➕ Add New Marker</p>
+                        <div className="grid grid-cols-4 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Marker Name *</label>
+                            <input
+                              type="text"
+                              value={newMarker.markerName}
+                              onChange={(e) => setNewMarker({...newMarker, markerName: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              placeholder="e.g., Marker 1"
+                            />
                           </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Size Ratio *</label>
+                            <input
+                              type="text"
+                              value={newMarker.sizeRatio}
+                              onChange={(e) => {
+                                const ratio = e.target.value;
+                                const autoPieces = calculatePiecesFromSizeRatio(ratio);
+                                setNewMarker({
+                                  ...newMarker, 
+                                  sizeRatio: ratio,
+                                  piecesPerLay: autoPieces > 0 ? String(autoPieces) : newMarker.piecesPerLay
+                                });
+                              }}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              placeholder="e.g., 2-S,3-M,3-L,2-XL"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Pieces per Lay * 
+                              {newMarker.sizeRatio && calculatePiecesFromSizeRatio(newMarker.sizeRatio) > 0 && (
+                                <span className="ml-1 text-green-600 font-bold">(Auto: {calculatePiecesFromSizeRatio(newMarker.sizeRatio)})</span>
+                              )}
+                            </label>
+                            <input
+                              type="number"
+                              value={newMarker.piecesPerLay}
+                              onChange={(e) => setNewMarker({...newMarker, piecesPerLay: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              placeholder="e.g., 10"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Fabric per Lay (m) *</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={newMarker.fabricPerLay}
+                              onChange={(e) => setNewMarker({...newMarker, fabricPerLay: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              placeholder="e.g., 2.5"
+                            />
+                          </div>
+                        </div>
+                        
+                        {/* Helper text for size ratio format */}
+                        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                          <strong>Size Ratio Format:</strong> qty-sizeName,qty-sizeName (e.g., "2-Small,3-Medium,3-Large,2-XL" or "1-Nine/Ten,1-Ten/Eleven")
+                          {newMarker.sizeRatio && calculatePiecesFromSizeRatio(newMarker.sizeRatio) > 0 && (
+                            <div className="mt-1 text-green-700 font-semibold">
+                              ✓ Auto-calculated: {calculatePiecesFromSizeRatio(newMarker.sizeRatio)} pieces per lay
+                            </div>
+                          )}
+                        </div>
+                        
+                        <button
+                          onClick={() => {
+                            if (newMarker.markerName && newMarker.piecesPerLay && newMarker.sizeRatio && newMarker.fabricPerLay) {
+                              const updatedOrders = orders.map(o => {
+                                if (o.id === order.id) {
+                                  return {
+                                    ...o,
+                                    cuttingData: {
+                                      ...o.cuttingData,
+                                      markers: [
+                                        ...(o.cuttingData.markers || []),
+                                        {
+                                          markerName: newMarker.markerName,
+                                          piecesPerLay: parseInt(newMarker.piecesPerLay),
+                                          sizeRatio: newMarker.sizeRatio,
+                                          fabricPerLay: parseFloat(newMarker.fabricPerLay)
+                                        }
+                                      ]
+                                    }
+                                  };
+                                }
+                                return o;
+                              });
+                              setOrders(updatedOrders);
+                              setNewMarker({ markerName: '', piecesPerLay: '', sizeRatio: '', fabricPerLay: '' });
+                            } else {
+                              alert('Please fill all marker fields');
+                            }
+                          }}
+                          className="w-full mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                        >
+                          Add Marker
+                        </button>
+                      </div>
 
                           {/* Daily Cutting Input */}
                           <div className="grid grid-cols-5 gap-3">
@@ -4328,6 +4553,7 @@ const App = () => {
                                     <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Size Ratio</th>
                                     <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Fabric (m)</th>
                                     <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Waste (m)</th>
+                                    <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700">Actions</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -4338,15 +4564,124 @@ const App = () => {
                                     const waste = typeof data === 'object' ? data.waste || 0 : 0;
                                     const sizeRatio = typeof data === 'object' ? data.sizeRatio || '-' : '-';
                                     const markerName = typeof data === 'object' ? data.markerName || '-' : '-';
+                                    
+                                    const isEditing = editingCuttingEntry?.orderId === order.id && editingCuttingEntry?.date === date;
+                                    
+                                    if (isEditing) {
+                                      return (
+                                        <tr key={date} className="border-t bg-yellow-50">
+                                          <td className="px-4 py-2">
+                                            <input
+                                              type="date"
+                                              value={editCuttingData.date}
+                                              onChange={(e) => setEditCuttingData({...editCuttingData, date: e.target.value})}
+                                              className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                            />
+                                          </td>
+                                          <td className="px-4 py-2">
+                                            <select
+                                              value={editCuttingData.markerIndex}
+                                              onChange={(e) => setEditCuttingData({...editCuttingData, markerIndex: e.target.value})}
+                                              className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                            >
+                                              <option value="">Select marker...</option>
+                                              {order.cuttingData.markers?.map((marker, idx) => (
+                                                <option key={idx} value={idx}>{marker.markerName}</option>
+                                              ))}
+                                            </select>
+                                          </td>
+                                          <td className="px-4 py-2">
+                                            <input
+                                              type="number"
+                                              value={editCuttingData.layersCut}
+                                              onChange={(e) => setEditCuttingData({...editCuttingData, layersCut: e.target.value})}
+                                              className="w-full px-2 py-1 border border-gray-300 rounded text-xs text-right"
+                                              placeholder="Layers"
+                                            />
+                                          </td>
+                                          <td className="px-4 py-2 text-right text-xs text-gray-500">
+                                            {editCuttingData.layersCut && editCuttingData.markerIndex !== '' 
+                                              ? (parseInt(editCuttingData.layersCut) * order.cuttingData.markers[parseInt(editCuttingData.markerIndex)].piecesPerLay).toLocaleString()
+                                              : '-'}
+                                          </td>
+                                          <td className="px-4 py-2 text-xs text-gray-500">
+                                            {editCuttingData.markerIndex !== '' 
+                                              ? order.cuttingData.markers[parseInt(editCuttingData.markerIndex)].sizeRatio
+                                              : '-'}
+                                          </td>
+                                          <td className="px-4 py-2 text-right text-xs text-gray-500">
+                                            {editCuttingData.layersCut && editCuttingData.markerIndex !== '' 
+                                              ? (parseInt(editCuttingData.layersCut) * order.cuttingData.markers[parseInt(editCuttingData.markerIndex)].fabricPerLay).toFixed(2)
+                                              : '-'}
+                                          </td>
+                                          <td className="px-4 py-2">
+                                            <input
+                                              type="number"
+                                              step="0.1"
+                                              value={editCuttingData.fabricWastage}
+                                              onChange={(e) => setEditCuttingData({...editCuttingData, fabricWastage: e.target.value})}
+                                              className="w-full px-2 py-1 border border-gray-300 rounded text-xs text-right"
+                                              placeholder="Waste"
+                                            />
+                                          </td>
+                                          <td className="px-4 py-2">
+                                            <div className="flex items-center justify-center gap-1">
+                                              <button
+                                                onClick={() => handleSaveEditedCuttingEntry(order)}
+                                                className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
+                                                title="Save"
+                                              >
+                                                <Save size={16} />
+                                              </button>
+                                              <button
+                                                onClick={() => {
+                                                  setEditingCuttingEntry(null);
+                                                  setEditCuttingData({
+                                                    date: '',
+                                                    markerIndex: '',
+                                                    layersCut: '',
+                                                    fabricWastage: '',
+                                                    notes: ''
+                                                  });
+                                                }}
+                                                className="p-1 text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                                                title="Cancel"
+                                              >
+                                                <X size={16} />
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      );
+                                    }
+                                    
                                     return (
                                       <tr key={date} className="border-t hover:bg-gray-50">
                                         <td className="px-4 py-2">{new Date(date).toLocaleDateString()}</td>
                                         <td className="px-4 py-2 font-semibold text-blue-700">{markerName}</td>
                                         <td className="px-4 py-2 text-right font-semibold">{layers}</td>
-                                        <td className="px-4 py-2 text-right font-semibold text-purple-600">{pieces}</td>
+                                        <td className="px-4 py-2 text-right font-semibold text-purple-600">{pieces.toLocaleString()}</td>
                                         <td className="px-4 py-2 text-left text-xs text-gray-600">{sizeRatio}</td>
                                         <td className="px-4 py-2 text-right font-semibold text-blue-600">{fabric.toFixed(2)}</td>
                                         <td className="px-4 py-2 text-right font-semibold text-red-600">{waste.toFixed(2)}</td>
+                                        <td className="px-4 py-2">
+                                          <div className="flex items-center justify-center gap-1">
+                                            <button
+                                              onClick={() => handleEditCuttingEntry(order, date, data)}
+                                              className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                              title="Edit Entry"
+                                            >
+                                              <Edit2 size={16} />
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteCuttingEntry(order, date)}
+                                              className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                              title="Delete Entry"
+                                            >
+                                              <Trash2 size={16} />
+                                            </button>
+                                          </div>
+                                        </td>
                                       </tr>
                                     );
                                   })}
@@ -4450,29 +4785,138 @@ const App = () => {
                       </div>
 
                       <div className="p-4">
-                        <div className="grid grid-cols-5 gap-4 mb-4">
+                        <div className="grid grid-cols-6 gap-3 mb-4">
                           <div className="bg-white rounded-lg p-3 border">
-                            <p className="text-xs text-gray-600">Total Quantity</p>
-                            <p className="text-2xl font-bold text-gray-900">{order.quantity}</p>
+                            <p className="text-xs text-gray-600">Order Quantity</p>
+                            <p className="text-2xl font-bold text-gray-900">{parseInt(order.quantity).toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">Target pieces</p>
                           </div>
                           <div className="bg-white rounded-lg p-3 border">
                             <p className="text-xs text-gray-600">Produced</p>
-                            <p className="text-2xl font-bold text-blue-600">{totalProduced}</p>
+                            <p className="text-2xl font-bold text-blue-600">{totalProduced.toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">
+                              {Math.round((totalProduced / parseInt(order.quantity)) * 100)}% complete
+                            </p>
                           </div>
                           <div className="bg-white rounded-lg p-3 border">
                             <p className="text-xs text-gray-600">Packed</p>
-                            <p className="text-2xl font-bold text-green-600">{order.packingData.totalPacked}</p>
+                            <p className="text-2xl font-bold text-green-600">{order.packingData.totalPacked.toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">
+                              {Math.round((order.packingData.totalPacked / parseInt(order.quantity)) * 100)}% of order
+                            </p>
+                          </div>
+                          <div className={`bg-white rounded-lg p-3 border-2 ${
+                            (totalProduced - order.packingData.totalPacked) < 0 
+                              ? 'border-red-300 bg-red-50' 
+                              : (totalProduced - order.packingData.totalPacked) === 0 
+                                ? 'border-green-300 bg-green-50'
+                                : 'border-yellow-300 bg-yellow-50'
+                          }`}>
+                            <p className="text-xs text-gray-600">Ready to Pack</p>
+                            <p className={`text-2xl font-bold ${
+                              (totalProduced - order.packingData.totalPacked) < 0 
+                                ? 'text-red-600' 
+                                : (totalProduced - order.packingData.totalPacked) === 0 
+                                  ? 'text-green-600'
+                                  : 'text-yellow-600'
+                            }`}>
+                              {Math.max(0, totalProduced - order.packingData.totalPacked).toLocaleString()}
+                            </p>
+                            <p className="text-[10px] text-gray-600 mt-1">
+                              {totalProduced - order.packingData.totalPacked < 0 
+                                ? '⚠️ Over-packed!' 
+                                : totalProduced - order.packingData.totalPacked === 0
+                                  ? '✓ All packed'
+                                  : 'Available now'}
+                            </p>
                           </div>
                           <div className="bg-white rounded-lg p-3 border">
                             <p className="text-xs text-gray-600">Total Boxes</p>
                             <p className="text-2xl font-bold text-purple-600">{order.packingData.boxes.length}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">
+                              {order.packingData.boxes.length > 0 
+                                ? `Avg ${Math.round(order.packingData.totalPacked / order.packingData.boxes.length)} pcs/box`
+                                : 'No boxes yet'}
+                            </p>
                           </div>
                           <div className="bg-white rounded-lg p-3 border">
                             <p className="text-xs text-gray-600">Total Weight</p>
                             <p className="text-2xl font-bold text-orange-600">
-                              {order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(1)} kg
+                              {order.packingData.boxes.reduce((sum, box) => sum + (box.weight || 0), 0).toFixed(1)}
                             </p>
+                            <p className="text-[10px] text-gray-500 mt-1">kilograms</p>
                           </div>
+                        </div>
+
+                        {/* Production vs Packing Visual Bar */}
+                        <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border-2 border-blue-200">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-semibold text-gray-700">Production vs Packing Progress</h4>
+                            <div className="text-xs text-gray-600">
+                              {totalProduced >= order.packingData.totalPacked 
+                                ? `${(totalProduced - order.packingData.totalPacked).toLocaleString()} pieces waiting to be packed`
+                                : `⚠️ Over-packed by ${(order.packingData.totalPacked - totalProduced).toLocaleString()} pieces`}
+                            </div>
+                          </div>
+                          
+                          {/* Visual Progress Bars */}
+                          <div className="space-y-2">
+                            {/* Production Bar */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-medium text-blue-700">Production</span>
+                                <span className="text-xs font-bold text-blue-700">
+                                  {totalProduced.toLocaleString()} / {parseInt(order.quantity).toLocaleString()} 
+                                  ({Math.round((totalProduced / parseInt(order.quantity)) * 100)}%)
+                                </span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-4">
+                                <div
+                                  className="bg-blue-500 h-4 rounded-full transition-all flex items-center justify-end pr-2"
+                                  style={{ width: `${Math.min(100, (totalProduced / parseInt(order.quantity)) * 100)}%` }}
+                                >
+                                  {totalProduced > 0 && (
+                                    <span className="text-[10px] font-bold text-white">Produced</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Packing Bar */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-medium text-green-700">Packing</span>
+                                <span className="text-xs font-bold text-green-700">
+                                  {order.packingData.totalPacked.toLocaleString()} / {parseInt(order.quantity).toLocaleString()} 
+                                  ({Math.round((order.packingData.totalPacked / parseInt(order.quantity)) * 100)}%)
+                                </span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-4">
+                                <div
+                                  className={`h-4 rounded-full transition-all flex items-center justify-end pr-2 ${
+                                    order.packingData.totalPacked > totalProduced ? 'bg-red-500' : 'bg-green-500'
+                                  }`}
+                                  style={{ width: `${Math.min(100, (order.packingData.totalPacked / parseInt(order.quantity)) * 100)}%` }}
+                                >
+                                  {order.packingData.totalPacked > 0 && (
+                                    <span className="text-[10px] font-bold text-white">Packed</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Warning if over-packed */}
+                          {order.packingData.totalPacked > totalProduced && (
+                            <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded-lg">
+                              <p className="text-xs font-semibold text-red-800">
+                                ⚠️ WARNING: You have packed {(order.packingData.totalPacked - totalProduced).toLocaleString()} more pieces than produced!
+                              </p>
+                              <p className="text-xs text-red-700 mt-1">
+                                Please verify your packing data or wait for more production.
+                              </p>
+                            </div>
+                          )}
                         </div>
 
                         {/* Mode Toggle Buttons */}
