@@ -131,7 +131,6 @@ const App = () => {
     fabricPerLay: ''
   });
 
-  // NEW: Packing Department States
   const [packingBox, setPackingBox] = useState({
     boxNo: '',
     quantity: '',
@@ -139,6 +138,23 @@ const App = () => {
     weight: '',
     notes: ''
   });
+
+  const [bulkPackingMode, setBulkPackingMode] = useState(false);
+  const [bulkPacking, setBulkPacking] = useState({
+    startBoxNo: '',
+    numberOfBoxes: '',
+    quantityPerBox: '',
+    sizesPerBox: '',
+    weightPerBox: '',
+    notes: ''
+  });
+
+  const [standardPacks, setStandardPacks] = useState([
+    { id: 1, name: 'Standard 100pcs', quantity: 100, sizes: 'Mixed', weight: 15 },
+    { id: 2, name: 'Small Pack 50pcs', quantity: 50, sizes: 'Mixed', weight: 8 },
+    { id: 3, name: 'Large Pack 200pcs', quantity: 200, sizes: 'Mixed', weight: 30 }
+  ]);
+
 
   const [newTrimItem, setNewTrimItem] = useState({
     name: '',
@@ -561,7 +577,7 @@ const App = () => {
     return { status: 'behind', label: 'Behind Schedule', color: 'red' };
   };
 
-  // NEW: Packing Department Functions
+  // Enhanced handleAddPackingBox function (replace existing)
   const handleAddPackingBox = () => {
     if (!selectedOrderForPacking || !packingBox.boxNo || !packingBox.quantity) return;
 
@@ -593,7 +609,87 @@ const App = () => {
     });
 
     setOrders(updatedOrders);
-    setPackingBox({ boxNo: '', quantity: '', sizes: '', weight: '', notes: '' });
+    
+    // Auto-increment box number for next entry
+    const nextBoxNo = String(parseInt(packingBox.boxNo) + 1).padStart(packingBox.boxNo.length, '0');
+    setPackingBox({ 
+      boxNo: nextBoxNo, 
+      quantity: packingBox.quantity, // Keep same quantity
+      sizes: packingBox.sizes, // Keep same sizes
+      weight: packingBox.weight, // Keep same weight
+      notes: '' 
+    });
+  };
+
+  // NEW: Bulk Box Generation
+  const handleBulkAddBoxes = () => {
+    if (!selectedOrderForPacking || !bulkPacking.startBoxNo || !bulkPacking.numberOfBoxes || !bulkPacking.quantityPerBox) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    const updatedOrders = orders.map(order => {
+      if (order.id === selectedOrderForPacking.id) {
+        const newBoxes = [];
+        const startNum = parseInt(bulkPacking.startBoxNo);
+        const numBoxes = parseInt(bulkPacking.numberOfBoxes);
+        const qty = parseInt(bulkPacking.quantityPerBox);
+        const weight = parseFloat(bulkPacking.weightPerBox) || 0;
+        
+        for (let i = 0; i < numBoxes; i++) {
+          const boxNumber = String(startNum + i).padStart(bulkPacking.startBoxNo.length, '0');
+          newBoxes.push({
+            id: Date.now() + i,
+            boxNo: boxNumber,
+            quantity: qty,
+            sizes: bulkPacking.sizesPerBox,
+            weight: weight,
+            notes: bulkPacking.notes,
+            date: new Date().toISOString().split('T')[0]
+          });
+        }
+
+        const updatedBoxes = [...(order.packingData.boxes || []), ...newBoxes];
+        const totalPacked = updatedBoxes.reduce((sum, box) => sum + box.quantity, 0);
+
+        return {
+          ...order,
+          packingData: {
+            ...order.packingData,
+            boxes: updatedBoxes,
+            totalPacked
+          }
+        };
+      }
+      return order;
+    });
+
+    setOrders(updatedOrders);
+    setBulkPacking({
+      startBoxNo: '',
+      numberOfBoxes: '',
+      quantityPerBox: '',
+      sizesPerBox: '',
+      weightPerBox: '',
+      notes: ''
+    });
+    setBulkPackingMode(false);
+  };
+
+  // NEW: Apply Standard Pack Template
+  const applyStandardPack = (pack) => {
+    const lastBox = selectedOrderForPacking?.packingData?.boxes?.slice(-1)[0];
+    const nextBoxNo = lastBox 
+      ? String(parseInt(lastBox.boxNo) + 1).padStart(3, '0')
+      : '001';
+    
+    setPackingBox({
+      boxNo: nextBoxNo,
+      quantity: String(pack.quantity),
+      sizes: pack.sizes,
+      weight: String(pack.weight),
+      notes: `Standard Pack: ${pack.name}`
+    });
   };
 
 
@@ -818,7 +914,13 @@ const App = () => {
   };
 
   const handleDeleteOrder = (id) => {
-    setOrders(orders.filter(order => order.id !== id));
+    const order = orders.find(o => o.id === id);
+    if (order) {
+      const confirmMessage = `Are you sure you want to delete order ${order.orderNumber} (${order.client})?\n\nThis action cannot be undone.`;
+      if (confirm(confirmMessage)) {
+        setOrders(orders.filter(order => order.id !== id));
+      }
+    }
   };
 
   const handleCompleteOrder = (orderId) => {
@@ -845,7 +947,16 @@ const App = () => {
   };
 
   const handleDeleteCompletedOrder = (id) => {
-    setCompletedOrders(completedOrders.filter(order => order.id !== id));
+    const order = completedOrders.find(o => o.id === id);
+    if (order) {
+      const confirmMessage = 
+        `Are you sure you want to permanently delete order ${order.orderNumber} (${order.client})?\n\n` +
+        `This will remove all data for this order and cannot be undone.`;
+      
+      if (confirm(confirmMessage)) {
+        setCompletedOrders(completedOrders.filter(order => order.id !== id));
+      }
+    }
   };
 
   const handleAddLine = () => {
@@ -4262,17 +4373,17 @@ const App = () => {
       )}
 
 
-      {/* NEW: Packing Department Modal */}
+      {/* ENHANCED: Packing Department Modal */}
       {showPackingDept && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-7xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
               <div>
                 <h2 className="text-2xl font-semibold flex items-center gap-2">
                   <Box className="text-teal-600" size={28} />
                   Packing Department
                 </h2>
-                <p className="text-sm text-gray-600 mt-1">Track packing progress and generate packing lists</p>
+                <p className="text-sm text-gray-600 mt-1">Bulk packing entry for factory production</p>
               </div>
               <button
                 onClick={() => setShowPackingDept(false)}
@@ -4364,79 +4475,260 @@ const App = () => {
                           </div>
                         </div>
 
-                        <div className="bg-teal-50 rounded-lg p-4 border-2 border-teal-200 mb-4">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Add New Box</h4>
-                          <div className="grid grid-cols-5 gap-3">
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Box Number *</label>
-                              <input
-                                type="text"
-                                value={packingBox.boxNo}
-                                onChange={(e) => setPackingBox({...packingBox, boxNo: e.target.value})}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                placeholder="e.g., 001"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Quantity *</label>
-                              <input
-                                type="number"
-                                value={packingBox.quantity}
-                                onChange={(e) => setPackingBox({...packingBox, quantity: e.target.value})}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                placeholder="e.g., 100"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Sizes</label>
-                              <input
-                                type="text"
-                                value={packingBox.sizes}
-                                onChange={(e) => setPackingBox({...packingBox, sizes: e.target.value})}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                placeholder="e.g., S/M/L"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Weight (kg)</label>
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={packingBox.weight}
-                                onChange={(e) => setPackingBox({...packingBox, weight: e.target.value})}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                placeholder="e.g., 15.5"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-                              <input
-                                type="text"
-                                value={packingBox.notes}
-                                onChange={(e) => setPackingBox({...packingBox, notes: e.target.value})}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                placeholder="Optional"
-                              />
-                            </div>
-                          </div>
+                        {/* Mode Toggle Buttons */}
+                        <div className="flex gap-3 mb-4">
                           <button
                             onClick={() => {
+                              setBulkPackingMode(false);
                               setSelectedOrderForPacking(order);
-                              handleAddPackingBox();
                             }}
-                            className="w-full mt-3 flex items-center justify-center gap-2 bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 transition-colors font-medium"
+                            className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+                              !bulkPackingMode
+                                ? 'bg-teal-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
                           >
-                            <Plus size={18} />
-                            Add Box
+                            📦 Quick Entry Mode
+                          </button>
+                          <button
+                            onClick={() => {
+                              setBulkPackingMode(true);
+                              setSelectedOrderForPacking(order);
+                            }}
+                            className={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
+                              bulkPackingMode
+                                ? 'bg-teal-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            🚀 Bulk Entry Mode
                           </button>
                         </div>
 
+                        {!bulkPackingMode ? (
+                          // QUICK ENTRY MODE
+                          <div className="bg-teal-50 rounded-lg p-4 border-2 border-teal-200 mb-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-sm font-semibold text-gray-700">Quick Add Box (Press Enter to add)</h4>
+                              <div className="flex gap-2">
+                                {standardPacks.map(pack => (
+                                  <button
+                                    key={pack.id}
+                                    onClick={() => {
+                                      setSelectedOrderForPacking(order);
+                                      applyStandardPack(pack);
+                                    }}
+                                    className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded font-medium"
+                                    title={`${pack.quantity}pcs, ${pack.weight}kg`}
+                                  >
+                                    {pack.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-6 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Box No *</label>
+                                <input
+                                  type="text"
+                                  value={packingBox.boxNo}
+                                  onChange={(e) => setPackingBox({...packingBox, boxNo: e.target.value})}
+                                  onKeyPress={(e) => {
+                                    if (e.key === 'Enter') {
+                                      setSelectedOrderForPacking(order);
+                                      handleAddPackingBox();
+                                    }
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"
+                                  placeholder="001"
+                                  autoFocus
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Qty *</label>
+                                <input
+                                  type="number"
+                                  value={packingBox.quantity}
+                                  onChange={(e) => setPackingBox({...packingBox, quantity: e.target.value})}
+                                  onKeyPress={(e) => {
+                                    if (e.key === 'Enter') {
+                                      setSelectedOrderForPacking(order);
+                                      handleAddPackingBox();
+                                    }
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="100"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Sizes</label>
+                                <input
+                                  type="text"
+                                  value={packingBox.sizes}
+                                  onChange={(e) => setPackingBox({...packingBox, sizes: e.target.value})}
+                                  onKeyPress={(e) => {
+                                    if (e.key === 'Enter') {
+                                      setSelectedOrderForPacking(order);
+                                      handleAddPackingBox();
+                                    }
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="S/M/L"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Weight (kg)</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={packingBox.weight}
+                                  onChange={(e) => setPackingBox({...packingBox, weight: e.target.value})}
+                                  onKeyPress={(e) => {
+                                    if (e.key === 'Enter') {
+                                      setSelectedOrderForPacking(order);
+                                      handleAddPackingBox();
+                                    }
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="15.5"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                                <input
+                                  type="text"
+                                  value={packingBox.notes}
+                                  onChange={(e) => setPackingBox({...packingBox, notes: e.target.value})}
+                                  onKeyPress={(e) => {
+                                    if (e.key === 'Enter') {
+                                      setSelectedOrderForPacking(order);
+                                      handleAddPackingBox();
+                                    }
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="Optional"
+                                />
+                              </div>
+                              <div className="flex items-end">
+                                <button
+                                  onClick={() => {
+                                    setSelectedOrderForPacking(order);
+                                    handleAddPackingBox();
+                                  }}
+                                  className="w-full bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 transition-colors font-medium"
+                                >
+                                  Add
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-xs text-teal-700 mt-2">💡 Tip: Press Enter to quickly add boxes. Box number auto-increments!</p>
+                          </div>
+                        ) : (
+                          // BULK ENTRY MODE
+                          <div className="bg-purple-50 rounded-lg p-4 border-2 border-purple-200 mb-4">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3">🚀 Bulk Add Multiple Boxes</h4>
+                            <div className="grid grid-cols-3 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Start Box No *</label>
+                                <input
+                                  type="text"
+                                  value={bulkPacking.startBoxNo}
+                                  onChange={(e) => setBulkPacking({...bulkPacking, startBoxNo: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"
+                                  placeholder="001"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Number of Boxes *</label>
+                                <input
+                                  type="number"
+                                  value={bulkPacking.numberOfBoxes}
+                                  onChange={(e) => setBulkPacking({...bulkPacking, numberOfBoxes: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="50"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Qty per Box *</label>
+                                <input
+                                  type="number"
+                                  value={bulkPacking.quantityPerBox}
+                                  onChange={(e) => setBulkPacking({...bulkPacking, quantityPerBox: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="100"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Sizes per Box</label>
+                                <input
+                                  type="text"
+                                  value={bulkPacking.sizesPerBox}
+                                  onChange={(e) => setBulkPacking({...bulkPacking, sizesPerBox: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="Mixed"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Weight per Box (kg)</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={bulkPacking.weightPerBox}
+                                  onChange={(e) => setBulkPacking({...bulkPacking, weightPerBox: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="15.5"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                                <input
+                                  type="text"
+                                  value={bulkPacking.notes}
+                                  onChange={(e) => setBulkPacking({...bulkPacking, notes: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  placeholder="Optional"
+                                />
+                              </div>
+                            </div>
+                            
+                            {bulkPacking.startBoxNo && bulkPacking.numberOfBoxes && bulkPacking.quantityPerBox && (
+                              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p className="text-sm font-semibold text-blue-900">
+                                  📊 Preview: Will create boxes {bulkPacking.startBoxNo} to {String(parseInt(bulkPacking.startBoxNo) + parseInt(bulkPacking.numberOfBoxes) - 1).padStart(bulkPacking.startBoxNo.length, '0')}
+                                </p>
+                                <p className="text-xs text-blue-700 mt-1">
+                                  Total: {parseInt(bulkPacking.numberOfBoxes)} boxes × {parseInt(bulkPacking.quantityPerBox)} pcs = {parseInt(bulkPacking.numberOfBoxes) * parseInt(bulkPacking.quantityPerBox)} pieces
+                                </p>
+                              </div>
+                            )}
+                            
+                            <button
+                              onClick={() => {
+                                setSelectedOrderForPacking(order);
+                                handleBulkAddBoxes();
+                              }}
+                              className="w-full mt-3 flex items-center justify-center gap-2 bg-purple-600 text-white px-4 py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                            >
+                              <Plus size={18} />
+                              Generate {bulkPacking.numberOfBoxes || 0} Boxes
+                            </button>
+                          </div>
+                        )}
+
                         {order.packingData.boxes.length > 0 ? (
                           <div>
-                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Packed Boxes</h4>
-                            <div className="bg-white rounded-lg border overflow-hidden">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="text-sm font-semibold text-gray-700">
+                                Packed Boxes ({order.packingData.boxes.length})
+                              </h4>
+                              <div className="text-xs text-gray-600">
+                                Last box: #{order.packingData.boxes[order.packingData.boxes.length - 1]?.boxNo}
+                              </div>
+                            </div>
+                            <div className="bg-white rounded-lg border overflow-hidden max-h-64 overflow-y-auto">
                               <table className="w-full text-sm">
-                                <thead className="bg-gray-50">
+                                <thead className="bg-gray-50 sticky top-0">
                                   <tr>
                                     <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700">Box No</th>
                                     <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700">Quantity</th>
@@ -4448,9 +4740,9 @@ const App = () => {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {order.packingData.boxes.sort((a, b) => b.date.localeCompare(a.date)).map((box) => (
+                                  {order.packingData.boxes.sort((a, b) => b.date.localeCompare(a.date) || b.boxNo.localeCompare(a.boxNo)).map((box) => (
                                     <tr key={box.id} className="border-t hover:bg-gray-50">
-                                      <td className="px-4 py-2 font-semibold">{box.boxNo}</td>
+                                      <td className="px-4 py-2 font-semibold font-mono">{box.boxNo}</td>
                                       <td className="px-4 py-2 text-right font-semibold">{box.quantity} pcs</td>
                                       <td className="px-4 py-2">{box.sizes || 'N/A'}</td>
                                       <td className="px-4 py-2 text-right">{box.weight || 0} kg</td>
@@ -4459,8 +4751,10 @@ const App = () => {
                                       <td className="px-4 py-2 text-center">
                                         <button
                                           onClick={() => {
-                                            setSelectedOrderForPacking(order);
-                                            handleDeleteBox(box.id);
+                                            if (confirm(`Delete box ${box.boxNo}?`)) {
+                                              setSelectedOrderForPacking(order);
+                                              handleDeleteBox(box.id);
+                                            }
                                           }}
                                           className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
                                           title="Delete Box"
