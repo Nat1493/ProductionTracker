@@ -62,13 +62,7 @@ const App = () => {
   ]);
 
   const [completedOrders, setCompletedOrders] = useState([]);
-  const [productionLines, setProductionLines] = useState([
-    { id: 1, name: 'Line 1', operators: 10 },
-    { id: 2, name: 'Line 2', operators: 10 },
-    { id: 3, name: 'Line 3', operators: 8 },
-    { id: 4, name: 'Line 4', operators: 8 },
-    { id: 5, name: 'Line 5', operators: 8 }
-  ]);
+  const [productionLines, setProductionLines] = useState([]);
 
   const [excludeWeekends, setExcludeWeekends] = useState(true);
   const [holidays, setHolidays] = useState([]);
@@ -93,6 +87,7 @@ const App = () => {
   const [showStatsCards, setShowStatsCards] = useState(false);
   const [showLineCapacity, setShowLineCapacity] = useState(false);
   const [showOrdersPanel, setShowOrdersPanel] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
   const [selectedHourlyCell, setSelectedHourlyCell] = useState(null);
   const [productionInput, setProductionInput] = useState('');
@@ -101,6 +96,7 @@ const App = () => {
   const [editingOrder, setEditingOrder] = useState(null);
   const [newLineName, setNewLineName] = useState('');
   const [newLineOperators, setNewLineOperators] = useState(10);
+  const [editingLine, setEditingLine] = useState(null);
   const [activeTab, setActiveTab] = useState('active');
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showDailyReport, setShowDailyReport] = useState(false);
@@ -244,9 +240,10 @@ const App = () => {
     };
 
 
-  React.useEffect(() => {
-    const loadData = async () => {
-      if (isElectron) {
+React.useEffect(() => {
+  const loadData = async () => {
+    if (isElectron) {
+      try {
         const savedOrders = await loadFromStorage('orders', null);
         const savedCompleted = await loadFromStorage('completedOrders', []);
         const savedLines = await loadFromStorage('productionLines', null);
@@ -258,16 +255,47 @@ const App = () => {
 
         if (savedOrders) setOrders(savedOrders);
         if (savedCompleted) setCompletedOrders(savedCompleted);
-        if (savedLines) setProductionLines(savedLines);
+        
+        // Load production lines with default fallback
+        if (savedLines && savedLines.length > 0) {
+          console.log('✅ Loaded production lines from storage:', savedLines);
+          setProductionLines(savedLines);
+        } else {
+          // First time running - initialize with defaults
+          console.log('⚙️ Initializing default production lines');
+          const defaultLines = [
+            { id: 1, name: 'Line 1', operators: 10 },
+            { id: 2, name: 'Line 2', operators: 10 },
+            { id: 3, name: 'Line 3', operators: 8 },
+            { id: 4, name: 'Line 4', operators: 8 },
+            { id: 5, name: 'Line 5', operators: 8 }
+          ];
+          setProductionLines(defaultLines);
+          // Save defaults immediately
+          await saveToStorage('productionLines', defaultLines);
+        }
+        
         setExcludeWeekends(savedWeekends);
         setHolidays(savedHolidays);
         setWorkingHours(savedWorkingHours);
         setWorkStartHour(savedWorkStartHour);
         setCustomFolder(savedCustomFolder);
+      } catch (error) {
+        console.error('❌ Error loading data:', error);
+        // Initialize with defaults on error
+        const defaultLines = [
+          { id: 1, name: 'Line 1', operators: 10 },
+          { id: 2, name: 'Line 2', operators: 10 },
+          { id: 3, name: 'Line 3', operators: 8 },
+          { id: 4, name: 'Line 4', operators: 8 },
+          { id: 5, name: 'Line 5', operators: 8 }
+        ];
+        setProductionLines(defaultLines);
       }
-    };
-    loadData();
-  }, []);
+    }
+  };
+  loadData();
+}, [isElectron]);
 
 
   React.useEffect(() => {
@@ -287,6 +315,15 @@ const App = () => {
       setOrders(migratedOrders);
     }
   }, []); 
+
+  React.useEffect(() => { 
+    if (productionLines.length > 0) {
+      console.log('💾 Saving production lines:', productionLines);
+      saveToStorage('productionLines', productionLines).then(() => {
+        setLastSaved(new Date().toLocaleTimeString());
+      });
+    }
+  }, [productionLines]);
 
   React.useEffect(() => {
     if (!isElectron) return;
@@ -1186,6 +1223,15 @@ const handleDeleteCuttingEntry = (order, date) => {
       setNewLineOperators(10);
     }
   };
+
+  const handleUpdateLine = () => {
+  if (editingLine && editingLine.name.trim()) {
+    setProductionLines(productionLines.map(l => 
+      l.id === editingLine.id ? editingLine : l
+    ));
+    setEditingLine(null);
+  }
+};
 
   const handleDeleteLine = (lineId) => {
     const line = productionLines.find(l => l.id === lineId);
@@ -3881,100 +3927,260 @@ const handleDeleteCuttingEntry = (order, date) => {
         </div>
       )}
 
-      {/* Line Manager Modal */}
-      {showLineManager && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-6 border-b">
-              <h2 className="text-xl font-semibold">Manage Production Lines</h2>
-              <button
-                onClick={() => setShowLineManager(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X size={24} />
-              </button>
+  {/* Line Manager Modal */}
+  {showLineManager && (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
+          <div>
+            <h2 className="text-xl font-semibold">Manage Production Lines</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-sm text-gray-600">Edit line names and operator counts</p>
+              {lastSaved && (
+                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                  ✓ Saved at {lastSaved}
+                </span>
+              )}
             </div>
+          </div>
+          <button
+            onClick={() => {
+              setShowLineManager(false);
+              setEditingLine(null);
+            }}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X size={24} />
+          </button>
+        </div>
 
-            <div className="p-6">
-              <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Existing Lines</h3>
-                <div className="space-y-2">
-                  {productionLines.map(line => {
-                    const lineOrders = orders.filter(o => o.linesAssigned.includes(line.name));
-                    return (
-                      <div key={line.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border">
-                        <div className="flex-1">
-                          <p className="font-semibold text-gray-900">{line.name}</p>
-                          <div className="flex gap-4 text-xs text-gray-600 mt-1">
-                            <span>{lineOrders.length} assigned orders</span>
-                            <span>👥 {line.operators || 0} operators</span>
+        <div className="p-6">
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              Existing Lines ({productionLines.length})
+            </h3>
+            <div className="space-y-2">
+              {productionLines.map(line => {
+                const lineOrders = orders.filter(o => o.linesAssigned.includes(line.name));
+                const isEditing = editingLine?.id === line.id;
+                
+                return (
+                  <div key={line.id} className="p-3 bg-gray-50 rounded-lg border-2 border-gray-200 hover:border-gray-300 transition-colors">
+                    {isEditing ? (
+                      // EDIT MODE
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Line Name *</label>
+                            <input
+                              type="text"
+                              value={editingLine.name}
+                              onChange={(e) => setEditingLine({...editingLine, name: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                              placeholder="e.g., Line 1"
+                              autoFocus
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Operators *</label>
+                            <input
+                              type="number"
+                              value={editingLine.operators}
+                              onChange={(e) => setEditingLine({...editingLine, operators: parseInt(e.target.value) || 0})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                              placeholder="10"
+                              min="0"
+                            />
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={line.operators || 0}
-                            onChange={(e) => {
-                              const updatedLines = productionLines.map(l => 
-                                l.id === line.id ? { ...l, operators: parseInt(e.target.value) || 0 } : l
-                              );
-                              setProductionLines(updatedLines);
+                        
+                        {lineOrders.length > 0 && (
+                          <div className="p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                            <strong>Note:</strong> This line has {lineOrders.length} assigned order{lineOrders.length > 1 ? 's' : ''}. 
+                            Changing the name will update all order assignments.
+                          </div>
+                        )}
+                        
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              // Update all orders that reference this line
+                              const updatedOrders = orders.map(order => {
+                                if (order.linesAssigned.includes(line.name)) {
+                                  const newLinesAssigned = order.linesAssigned.map(l => 
+                                    l === line.name ? editingLine.name : l
+                                  );
+                                  
+                                  // Update line schedules with new name
+                                  const newLineSchedules = {};
+                                  Object.keys(order.lineSchedules || {}).forEach(key => {
+                                    const newKey = key === line.name ? editingLine.name : key;
+                                    newLineSchedules[newKey] = order.lineSchedules[key];
+                                  });
+                                  
+                                  return {
+                                    ...order,
+                                    linesAssigned: newLinesAssigned,
+                                    lineSchedules: newLineSchedules
+                                  };
+                                }
+                                return order;
+                              });
+                              
+                              setOrders(updatedOrders);
+                              handleUpdateLine();
                             }}
-                            className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center"
-                            placeholder="0"
-                            min="0"
-                          />
+                            className="flex-1 flex items-center justify-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium"
+                          >
+                            <Save size={18} />
+                            Save Changes
+                          </button>
+                          <button
+                            onClick={() => setEditingLine(null)}
+                            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      // VIEW MODE
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3">
+                            <p className="font-semibold text-gray-900 text-lg">{line.name}</p>
+                            <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded font-medium">
+                              👥 {line.operators || 0} operators
+                            </span>
+                            {lineOrders.length > 0 && (
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-medium">
+                                📦 {lineOrders.length} order{lineOrders.length > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                          {lineOrders.length > 0 && (
+                            <div className="mt-1 text-xs text-gray-600">
+                              Assigned to: {lineOrders.map(o => o.orderNumber).join(', ')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          <button
+                            onClick={() => setEditingLine({...line})}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="Edit Line"
+                          >
+                            <Edit2 size={18} />
+                          </button>
                           <button
                             onClick={() => handleDeleteLine(line.id)}
                             className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Delete Line"
                           >
                             <Trash2 size={18} />
                           </button>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="border-t pt-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Add New Line</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2">
-                    <label className="block text-xs text-gray-600 mb-1">Line Name</label>
-                    <input
-                      type="text"
-                      value={newLineName}
-                      onChange={(e) => setNewLineName(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Line name (e.g., Line 6)"
-                    />
+                    )}
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Operators</label>
-                    <input
-                      type="number"
-                      value={newLineOperators}
-                      onChange={(e) => setNewLineOperators(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="10"
-                      min="0"
-                    />
-                  </div>
+                );
+              })}
+              
+              {productionLines.length === 0 && (
+                <div className="text-center py-8 text-gray-500 bg-white rounded-lg border">
+                  <Settings size={32} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No production lines yet</p>
+                  <p className="text-xs mt-1">Add your first line below</p>
                 </div>
-                <button
-                  onClick={handleAddLine}
-                  className="w-full mt-3 flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <Plus size={20} />
-                  Add Line
-                </button>
-              </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
 
+          <div className="border-t pt-6">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Add New Line</h3>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-600 mb-1">Line Name *</label>
+                <input
+                  type="text"
+                  value={newLineName}
+                  onChange={(e) => setNewLineName(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Line name (e.g., Line 6)"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Operators *</label>
+                <input
+                  type="number"
+                  value={newLineOperators}
+                  onChange={(e) => setNewLineOperators(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="10"
+                  min="0"
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleAddLine}
+              disabled={!newLineName.trim()}
+              className="w-full mt-3 flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              <Plus size={20} />
+              Add Line
+            </button>
+          </div>
+          
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg border">
+            <h4 className="text-xs font-semibold text-gray-700 mb-2">💡 Quick Tips</h4>
+            <ul className="text-xs text-gray-600 space-y-1">
+              <li>• Click the <Edit2 size={12} className="inline" /> icon to edit line details</li>
+              <li>• Changes are saved automatically when you click "Save Changes"</li>
+              <li>• Renaming a line updates all assigned orders</li>
+              <li>• Lines with assigned orders cannot be deleted</li>
+            </ul>
+          </div>
+                  {/* ADD THE DEBUG TOOLS HERE */}
+          <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+            <h4 className="text-xs font-semibold text-gray-700 mb-2">🧪 Debug Tools</h4>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  const stored = await loadFromStorage('productionLines', null);
+                  console.log('📦 Currently stored lines:', stored);
+                  alert(`Stored lines: ${JSON.stringify(stored, null, 2)}`);
+                }}
+                className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+              >
+                Check Storage
+              </button>
+              <button
+                onClick={async () => {
+                  await saveToStorage('productionLines', productionLines);
+                  console.log('💾 Force saved:', productionLines);
+                  alert('Lines saved! Check console.');
+                }}
+                className="text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
+              >
+                Force Save
+              </button>
+              <button
+                onClick={() => {
+                  console.log('Current state:', productionLines);
+                  console.log('Is Electron?', isElectron);
+                  console.log('electronStore available?', window.electronStore !== undefined);
+                }}
+                className="text-xs bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700"
+              >
+                Check State
+              </button>
+            </div>
+          </div>
+          {/* END OF DEBUG TOOLS */}
+        </div>
+      </div>
+    </div>
+  )}
       {/* New Order Modal */}
       {showOrderForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
